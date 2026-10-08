@@ -1,0 +1,35 @@
+# ---- Arduino IDE / сборка ----
+build/
+*.bin
+*.elf
+*.hex
+*.map
+*.d
+*.o
+*.a
+*.tmp
+*.bak
+
+# ---- Arduino IDE временные ----
+*.ino.with_bootloader.bin
+*.partitions.bin
+*.bootloader.bin
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Редакторы ----
+.vscode/
+.idea/
+*.swp
+*~
+
+# ---- Локальные копии секретов (если будут) ----
+config.local.h
+secrets.h
+*.local
+
+# ---- Логи ----
+*.log
