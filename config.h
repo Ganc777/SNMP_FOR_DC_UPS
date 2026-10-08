@@ -1,6 +1,6 @@
 //==============================================================
 // SNMP_FOR_DC_UPS
-// Release : R09.4
+// Release : R09.5
 // File    : config.h
 //==============================================================
 // Конфигурация устройства. Значения ниже — ДЕФОЛТЫ.
@@ -20,7 +20,7 @@
 // 1. ИДЕНТИФИКАЦИЯ УСТРОЙСТВА
 //--------------------------------------------------------------
 #define FW_NAME              "SNMP_FOR_DC_UPS"
-#define FW_RELEASE           "R09.4"
+#define FW_RELEASE           "R09.5"
 #define FW_DEVICE_NAME       "SNMP_FOR_DC_UPS_ESP32_WEB"
 #define FW_MANUFACTURER      "Ganc777"
 #define FW_MODEL             "ESP32-ETH01 v1.4 DC UPS Monitor"
@@ -137,6 +137,7 @@
 //--------------------------------------------------------------
 #define OTA_USERNAME         "admin"
 #define OTA_PASSWORD         "CHANGE_ME"
+#define OTA_PATH             "/update"
 
 //--------------------------------------------------------------
 // 16. WAKE-ON-LAN
