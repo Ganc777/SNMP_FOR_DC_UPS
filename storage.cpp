@@ -1,12 +1,14 @@
 //==============================================================
 // SNMP_FOR_DC_UPS
-// Release : R09.0
+// Release : R09.6
 // File    : storage.cpp
 //==============================================================
 // R06.1: informPeriodSec принудительно = 30 при загрузке.
 // R07.0: добавлены поля Email (SMTP) в load/save/dump/defaults.
 // R07.7: удалено неиспользуемое поле logMaxBytes.
 // R09.0: добавлены поля uiLang и uiEventMask.
+// R09.6: ntpUse удалён, добавлены ntpSyncHour и ntpSyncMin.
+//        Старое значение "ntpUse" из NVS игнорируется.
 //==============================================================
 
 #include "storage.h"
@@ -30,10 +32,12 @@ void storageFillDefaults(Config &cfg) {
     cfg.gw                = NET_GW_DEFAULT;
     cfg.dns               = NET_DNS_DEFAULT;
 
-    cfg.ntpUse            = NTP_USE_DEFAULT;
+    // R09.6: ntpUse удалён — NTP всегда включён.
     cfg.ntpServer1        = NTP_SERVER1_DEFAULT;
     cfg.ntpServer2        = NTP_SERVER2_DEFAULT;
     cfg.ntpTz             = NTP_TZ_DEFAULT;
+    cfg.ntpSyncHour       = NTP_SYNC_HOUR_DEFAULT;
+    cfg.ntpSyncMin        = NTP_SYNC_MIN_DEFAULT;
 
     cfg.qnapIp            = SNMP_QNAP_IP_DEFAULT;
     cfg.qnapMac           = SNMP_QNAP_MAC_DEFAULT;
@@ -84,7 +88,6 @@ void storageFillDefaults(Config &cfg) {
     cfg.emPeriod          = EM_PERIOD_DEFAULT;
     cfg.emEvents          = EM_EVENTS_DEFAULT;
 
-    // R09.0: UI defaults
     cfg.uiLang            = "ru";
     cfg.uiEventMask       = 0x00FF;
 }
@@ -107,10 +110,12 @@ void storageLoad(Config &cfg) {
     cfg.gw            = prefs.getString("gw",       cfg.gw);
     cfg.dns           = prefs.getString("dns",      cfg.dns);
 
-    cfg.ntpUse        = prefs.getBool  ("ntpUse",   cfg.ntpUse);
+    // R09.6: "ntpUse" больше не читаем — NTP всегда включён.
     cfg.ntpServer1    = prefs.getString("ntpSrv1",  cfg.ntpServer1);
     cfg.ntpServer2    = prefs.getString("ntpSrv2",  cfg.ntpServer2);
     cfg.ntpTz         = prefs.getString("ntpTz",    cfg.ntpTz);
+    cfg.ntpSyncHour   = prefs.getUChar ("ntpSyncH", cfg.ntpSyncHour);
+    cfg.ntpSyncMin    = prefs.getUChar ("ntpSyncM", cfg.ntpSyncMin);
 
     cfg.qnapIp        = prefs.getString("qnapIp",   cfg.qnapIp);
     cfg.qnapMac       = prefs.getString("qnapMac",  cfg.qnapMac);
@@ -160,13 +165,16 @@ void storageLoad(Config &cfg) {
     cfg.emPeriod      = prefs.getUShort("emPeriod", cfg.emPeriod);
     cfg.emEvents      = prefs.getUShort("emEvents", cfg.emEvents);
 
-    // R09.0: UI
     cfg.uiLang        = prefs.getString("uiLang",   cfg.uiLang);
     cfg.uiEventMask   = prefs.getUShort("uiEvMask", cfg.uiEventMask);
 
     prefs.end();
 
     cfg.informPeriodSec = 30;
+
+    // R09.6: защита от некорректных значений в NVS
+    if (cfg.ntpSyncHour > 23) cfg.ntpSyncHour = NTP_SYNC_HOUR_DEFAULT;
+    if (cfg.ntpSyncMin  > 59) cfg.ntpSyncMin  = NTP_SYNC_MIN_DEFAULT;
 
     DbgInfo("Config loaded from NVS");
 }
@@ -187,10 +195,12 @@ void storageSave(const Config &cfg) {
     prefs.putString("gw",       cfg.gw);
     prefs.putString("dns",      cfg.dns);
 
-    prefs.putBool  ("ntpUse",   cfg.ntpUse);
+    // R09.6: "ntpUse" не сохраняем (устаревшее поле).
     prefs.putString("ntpSrv1",  cfg.ntpServer1);
     prefs.putString("ntpSrv2",  cfg.ntpServer2);
     prefs.putString("ntpTz",    cfg.ntpTz);
+    prefs.putUChar ("ntpSyncH", cfg.ntpSyncHour);
+    prefs.putUChar ("ntpSyncM", cfg.ntpSyncMin);
 
     prefs.putString("qnapIp",   cfg.qnapIp);
     prefs.putString("qnapMac",  cfg.qnapMac);
@@ -241,7 +251,6 @@ void storageSave(const Config &cfg) {
     prefs.putUShort("emPeriod", cfg.emPeriod);
     prefs.putUShort("emEvents", cfg.emEvents);
 
-    // R09.0: UI
     prefs.putString("uiLang",   cfg.uiLang);
     prefs.putUShort("uiEvMask", cfg.uiEventMask);
 
@@ -274,10 +283,12 @@ void storageDump(const Config &cfg) {
     DbgInfo("DHCP           : %s", cfg.useDhcp ? "yes" : "no");
     DbgInfo("IP/Mask/GW     : %s / %s / %s",
             cfg.ip.c_str(), cfg.mask.c_str(), cfg.gw.c_str());
-    DbgInfo("NTP use        : %s", cfg.ntpUse ? "yes" : "no");
     DbgInfo("NTP srv1/2     : %s / %s",
             cfg.ntpServer1.c_str(), cfg.ntpServer2.c_str());
     DbgInfo("NTP TZ         : %s", cfg.ntpTz.c_str());
+    DbgInfo("NTP sync time  : %02u:%02u (window %u min)",
+            (unsigned)cfg.ntpSyncHour, (unsigned)cfg.ntpSyncMin,
+            (unsigned)NTP_SYNC_WINDOW_MIN);
     DbgInfo("QNAP IP/MAC    : %s / %s",
             cfg.qnapIp.c_str(), cfg.qnapMac.c_str());
     DbgInfo("SNMP community : %s", cfg.snmpCommunity.c_str());
