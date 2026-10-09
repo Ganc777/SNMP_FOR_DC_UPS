@@ -1,13 +1,15 @@
 //==============================================================
 // SNMP_FOR_DC_UPS
-// Release : R09.0
+// Release : R09.6
 // File    : storage.h
 //==============================================================
 // R06.0: добавлены поля Telegram в Config.
 // R07.0: добавлены поля Email (SMTP) в Config.
 // R07.7: удалено неиспользуемое поле logMaxBytes.
-// R09.0: добавлены поля uiLang и uiEventMask для сохранения
-//        выбора языка интерфейса и чекбоксов событий в NVS.
+// R09.0: добавлены поля uiLang и uiEventMask.
+// R09.6: ntpUse удалён из Config (NTP всегда включён).
+//        Добавлены ntpSyncHour и ntpSyncMin — время начала
+//        окна синхронизации NTP (окно 1 час).
 //==============================================================
 
 #ifndef STORAGE_H
@@ -29,10 +31,13 @@ struct Config {
     String   dns;
 
     // NTP
-    bool     ntpUse;
+    // R09.6: поле ntpUse удалено — NTP всегда включён.
+    // Время начала окна синхронизации (окно 1 час).
     String   ntpServer1;
     String   ntpServer2;
     String   ntpTz;
+    uint8_t  ntpSyncHour;   // 0..23
+    uint8_t  ntpSyncMin;    // 0..59
 
     // SNMP
     String   qnapIp;
