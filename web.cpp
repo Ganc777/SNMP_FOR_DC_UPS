@@ -1,20 +1,19 @@
 //==============================================================
 // SNMP_FOR_DC_UPS
-// Release : R09.4
+// Release : R09.6
 // File    : web.cpp
 //==============================================================
-// R09.0: подсветка событий, цвета OK/FAIL, отчёты в 12:00,
-//        без легенды, исправлена иконка батареи, NVS, beforeunload.
-// R09.1: разорвана бесконечная рекурсия уведомлений (в logger).
-// R09.2: иконка батареи — тоньше тело, длиннее носик;
-//        неактивные табы и кнопки Час/Сутки — синяя рамка.
-// R09.3: переименованы поля chart._ups*, radius=11.
-// R09.4: иконка WoL на canvas — правильный arc (длинная дуга снизу);
-//        стек по X-координате внутри iconsPlugin; при равном
-//        расстоянии в mousemove берём последнюю (верхнюю).
+// R09.0–R09.5: см. паспорт проекта.
+// R09.6: вкладка «Системные настройки»:
+//        - удалён выпадающий список «Использовать NTP»
+//        - добавлены два выпадающих списка «Час / Минуты»
+//          для времени начала окна синхронизации NTP
+//        - подсказка под полями про окно 1 час
+//        API: поле ntpUse больше не читается/не отдаётся,
+//        вместо него ntpSyncHour и ntpSyncMin.
 //
-// ВНИМАНИЕ: файл выдан в двух частях. Стык — строка
-// "// === R09.4: СЕКЦИЯ 2 ===" — она не повторяется в коде.
+// 
+// 
 //==============================================================
 
 #include "web.h"
@@ -208,6 +207,11 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLDOC(
     font-size:12px;line-height:1.3;pointer-events:none;z-index:1000;
     display:none;white-space:nowrap;box-shadow:0 2px 10px rgba(0,0,0,0.6);}
   .evt-tip b{color:var(--accent);}
+
+  /* R09.6: строка с двумя селектами (час:минуты) + подсказка */
+  .ntp-time{display:grid;grid-template-columns:90px 90px;gap:6px;
+    align-items:center;}
+  .ntp-hint{color:#8cf;font-size:11px;margin-top:4px;line-height:1.4;}
 </style>
 </head>
 <body>
@@ -327,11 +331,16 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLDOC(
           <option value="AEST-10AEDT,M10.1.0,M4.1.0/3" data-tz="tzSYD">Сидней (UTC+10/+11, DST)</option>
         </select>
       </div>
-      <div class="field"><div class="label" data-i18n="lblUseNtp">Использовать NTP</div>
-        <select id="c_ntpUse">
-          <option value="1" data-i18n="yes">Да</option>
-          <option value="0" data-i18n="no">Нет</option>
-        </select>
+      <!-- R09.6: вместо "Использовать NTP" — время начала окна -->
+      <div class="field">
+        <div class="label" data-i18n="lblNtpSyncTime">Начало окна синхронизации NTP</div>
+        <div class="ntp-time">
+          <select id="c_ntpSyncHour"></select>
+          <select id="c_ntpSyncMin"></select>
+        </div>
+        <div class="ntp-hint" data-i18n="ntpSyncHint">
+          Окно синхронизации — 1 час. NTP всегда включён.
+        </div>
       </div>
       <div class="field"><div class="label" data-i18n="lblTempHighC">Порог температуры, °C</div>
         <input id="c_tempHighC" type="number" step="0.1"></div>
@@ -812,7 +821,8 @@ const i18n = {
     lblNtpSrv1: "NTP-сервер 1",
     lblNtpSrv2: "NTP-сервер 2",
     lblTimezone: "Часовой пояс",
-    lblUseNtp: "Использовать NTP",
+    lblNtpSyncTime: "Начало окна синхронизации NTP",
+    ntpSyncHint: "Окно синхронизации — 1 час. NTP всегда включён.",
     lblTempHighC: "Порог температуры, °C",
     lblBattFullV: "Батарея полная, В",
     lblBattWarnV: "Предупреждение, В",
@@ -1063,7 +1073,8 @@ const i18n = {
     lblNtpSrv1: "NTP server 1",
     lblNtpSrv2: "NTP server 2",
     lblTimezone: "Timezone",
-    lblUseNtp: "Use NTP",
+    lblNtpSyncTime: "NTP sync window start",
+    ntpSyncHint: "Sync window is 1 hour. NTP is always enabled.",
     lblTempHighC: "Temperature threshold, °C",
     lblBattFullV: "Battery full, V",
     lblBattWarnV: "Warning threshold, V",
@@ -1290,7 +1301,7 @@ function stateLabel(name) {
   return tr('state' + name);
 }
 
-// === R09.4: СЕКЦИЯ 2 ===
+// === R09.6: СЕКЦИЯ 2 ===
 //=================================================================
 // ФУНКЦИИ ОТОБРАЖЕНИЯ СТАТУСОВ
 //=================================================================
@@ -1335,6 +1346,53 @@ function updateEmStatus() {
   const b = document.getElementById('em_status');
   if (a) a.textContent = s;
   if (b) b.textContent = s;
+}
+
+//=================================================================
+// R09.6: селекты часа/минуты для начала окна NTP
+//=================================================================
+function initNtpTimeSelects() {
+  const hSel = document.getElementById('c_ntpSyncHour');
+  const mSel = document.getElementById('c_ntpSyncMin');
+  if (!hSel || !mSel) return;
+
+  if (hSel.options.length === 0) {
+    for (let h = 0; h < 24; h++) {
+      const o = document.createElement('option');
+      o.value = h;
+      o.textContent = (h < 10 ? '0' : '') + h;
+      hSel.appendChild(o);
+    }
+  }
+  if (mSel.options.length === 0) {
+    for (let m = 0; m < 60; m += 5) {
+      const o = document.createElement('option');
+      o.value = m;
+      o.textContent = (m < 10 ? '0' : '') + m;
+      mSel.appendChild(o);
+    }
+  }
+}
+
+function setNtpTimeValues(hour, min) {
+  const hSel = document.getElementById('c_ntpSyncHour');
+  const mSel = document.getElementById('c_ntpSyncMin');
+  if (!hSel || !mSel) return;
+
+  // Округление минут до шага 5
+  let m = parseInt(min);
+  if (isNaN(m)) m = 30;
+  m = Math.round(m / 5) * 5;
+  if (m > 55) m = 55;
+  if (m < 0)  m = 0;
+
+  let h = parseInt(hour);
+  if (isNaN(h)) h = 11;
+  if (h > 23) h = 23;
+  if (h < 0)  h = 0;
+
+  hSel.value = h;
+  mSel.value = m;
 }
 
 //=================================================================
@@ -1576,9 +1634,6 @@ function drawWifi(ctx, x, y, s, color, crossed) {
   ctx.restore();
 }
 
-// R09.4: правильный arc — идём ПРОТИВ часовой от -145° до -35°.
-// С anticlockwise=true Canvas идёт «длинным» путём через низ,
-// что даёт разрыв сверху между -145° и -35° (110°).
 function drawPowerSymbol(ctx, x, y, s, color) {
   ctx.save();
   ctx.strokeStyle = color;
@@ -1587,14 +1642,13 @@ function drawPowerSymbol(ctx, x, y, s, color) {
 
   const r = s * 0.42;
 
-  const startA = -Math.PI * 145 / 180;   // -145° — левая часть разрыва
-  const endA   = -Math.PI * 35 / 180;    // -35°  — правая часть разрыва
+  const startA = -Math.PI * 145 / 180;   // -145°
+  const endA   = -Math.PI * 35 / 180;    // -35°
 
   ctx.beginPath();
   ctx.arc(x, y, r, startA, endA, true);  // anticlockwise = true
   ctx.stroke();
 
-  // Вертикальная черта в разрыв
   ctx.beginPath();
   ctx.moveTo(x, y - r * 1.05);
   ctx.lineTo(x, y + r * 0.15);
@@ -1755,16 +1809,7 @@ function evtTipText(type) {
 }
 
 //=================================================================
-// ПЛАГИН ИКОНОК + СТЕК ПО X-КООРДИНАТЕ
-//
-// R09.4: стек теперь считается ПО X-КООРДИНАТЕ (совпадение в
-// пределах 3 px), независимо от разницы во времени. События,
-// «прилипшие» к одной точке [LOG], выстраиваются столбиком
-// снизу вверх — даже если их времена разнесены на минуты.
-//
-// Порядок `hits` теперь: сначала по xPix (возрастание), внутри
-// одной X — снизу вверх по времени. В mousemove при равном
-// расстоянии берём ПОСЛЕДНЮЮ (= верхнюю).
+// ПЛАГИН ИКОНОК + СТЕК ПО X
 //=================================================================
 const iconsPlugin = {
   id: 'iconsPlugin',
@@ -1790,7 +1835,6 @@ const iconsPlugin = {
     const chartBottom = chart.chartArea.bottom;
     const yBase = Math.min(yBottomBase, chartBottom) - 12;
 
-    // Шаг 1: собрать события с xPix
     const items = [];
     for (const ev of events) {
       const idx = findNearestIndex(ev.t);
@@ -1799,13 +1843,11 @@ const iconsPlugin = {
       items.push({ ev, xPix });
     }
 
-    // Шаг 2: сортировка — сначала по X, внутри X по t (возр.)
     items.sort((a, b) => {
       if (Math.abs(a.xPix - b.xPix) > 3) return a.xPix - b.xPix;
       return a.ev.t - b.ev.t;
     });
 
-    // Шаг 3: стек по совпадению X
     for (let i = 0; i < items.length; i++) {
       items[i].stack = 0;
       for (let j = 0; j < i; j++) {
@@ -1815,7 +1857,6 @@ const iconsPlugin = {
       }
     }
 
-    // Шаг 4: рисуем и заполняем hits в этом порядке (снизу вверх)
     const hits = [];
     for (const it of items) {
       const ev = it.ev;
@@ -2074,8 +2115,6 @@ function showMsg(text, ok) {
 
 //=================================================================
 // ПОДСВЕТКА СОБЫТИЯ ПРИ НАВЕДЕНИИ
-// R09.4: ищем БЛИЖАЙШУЮ иконку; при равном расстоянии берём
-//        ПОСЛЕДНЮЮ в массиве (= визуально верхнюю в столбике).
 //=================================================================
 (function() {
   const tip = document.getElementById('evtTip');
@@ -2101,7 +2140,6 @@ function showMsg(text, ok) {
       const dx = x - h.x;
       const dy = y - h.y;
       const d2 = dx*dx + dy*dy;
-      // R09.4: <= вместо < — при равном расстоянии берём последнюю
       if (d2 <= h.r * h.r && d2 <= bestDist2) {
         bestDist2 = d2;
         hit = h;
@@ -2228,7 +2266,6 @@ function rebuildChart() {
   if (document.getElementById('ev_tg_em').checked) enabledCats.push('notify');
   enabledCats.push('temp');
 
-  // R09.4: без _stack — стек теперь считается в iconsPlugin по X.
   let visibleEvents = lastEvents
     .filter(ev => enabledCats.includes(ev.cat) && ev.t >= from && ev.t <= to)
     .sort((a, b) => a.t - b.t);
@@ -2317,7 +2354,7 @@ async function ntpSyncNow() {
 //=================================================================
 const PANE_FIELDS = {
   net:  ['wifiSsid','wifiPass','hostname','useDhcp','ip','mask','gw','dns',
-         'ntpServer1','ntpServer2','ntpTz','ntpUse','tempHighC',
+         'ntpServer1','ntpServer2','ntpTz','tempHighC',
          'battFullV','battEmptyV','battWarnV','battCapacityWh','loadCurrentA',
          'inputLostV','hystV','adcPollMs'],
   snmp: ['qnapIp','qnapMac','snmpCommunity','snmpPort','useInform','enterpriseOid'],
@@ -2336,6 +2373,13 @@ function collectAllFields() {
       if (el) body[f] = el.value;
     });
   });
+
+  // R09.6: время начала окна NTP
+  const hSel = document.getElementById('c_ntpSyncHour');
+  const mSel = document.getElementById('c_ntpSyncMin');
+  if (hSel) body.ntpSyncHour = parseInt(hSel.value);
+  if (mSel) body.ntpSyncMin  = parseInt(mSel.value);
+
   const ipEl  = document.getElementById('c2_qnapIp');
   const macEl = document.getElementById('c2_qnapMac');
   if (ipEl)  body.qnapIp  = ipEl.value;
@@ -2417,6 +2461,11 @@ async function loadConfig() {
   const macEl = document.getElementById('c2_qnapMac');
   if (ipEl  && c.qnapIp)  ipEl.value  = c.qnapIp;
   if (macEl && c.qnapMac) macEl.value = c.qnapMac;
+
+  // R09.6: время начала окна NTP
+  if (c.ntpSyncHour !== undefined && c.ntpSyncMin !== undefined) {
+    setNtpTimeValues(c.ntpSyncHour, c.ntpSyncMin);
+  }
 
   const mask = (c.tgEvents !== undefined) ? parseInt(c.tgEvents) : 0x00FF;
   document.getElementById('evt_power').checked = !!(mask & 0x0001);
@@ -2611,6 +2660,7 @@ async function clearLog() {
 // ИНИЦИАЛИЗАЦИЯ
 //=================================================================
 (function() {
+  initNtpTimeSelects();
   initChartWindow();
   renderRangeRow();
 
@@ -2710,10 +2760,12 @@ static void handleApiConfigGet() {
     j += "\"mask\":\""   + s_cfg.mask + "\",";
     j += "\"gw\":\""     + s_cfg.gw + "\",";
     j += "\"dns\":\""    + s_cfg.dns + "\",";
-    j += "\"ntpUse\":" + String(s_cfg.ntpUse ? 1 : 0) + ",";
+    // R09.6: ntpUse больше не отдаётся.
     j += "\"ntpServer1\":\"" + s_cfg.ntpServer1 + "\",";
     j += "\"ntpServer2\":\"" + s_cfg.ntpServer2 + "\",";
     j += "\"ntpTz\":\""      + s_cfg.ntpTz + "\",";
+    j += "\"ntpSyncHour\":" + String((unsigned)s_cfg.ntpSyncHour) + ",";
+    j += "\"ntpSyncMin\":"  + String((unsigned)s_cfg.ntpSyncMin) + ",";
     j += "\"tempHighC\":" + String(s_cfg.tempHighC, 1) + ",";
     j += "\"qnapIp\":\""         + s_cfg.qnapIp + "\",";
     j += "\"qnapMac\":\""        + s_cfg.qnapMac + "\",";
@@ -2811,10 +2863,16 @@ static void handleApiConfigPost() {
     if (jsonGetString(body, "gw", s))             s_cfg.gw = s;
     if (jsonGetString(body, "dns", s))            s_cfg.dns = s;
 
-    if (jsonGetInt   (body, "ntpUse", i))         s_cfg.ntpUse = (i != 0);
+    // R09.6: NTP всегда включён, поле ntpUse игнорируем.
     if (jsonGetString(body, "ntpServer1", s))     s_cfg.ntpServer1 = s;
     if (jsonGetString(body, "ntpServer2", s))     s_cfg.ntpServer2 = s;
     if (jsonGetString(body, "ntpTz", s))          s_cfg.ntpTz = s;
+    if (jsonGetInt   (body, "ntpSyncHour", i)) {
+        if (i >= 0 && i <= 23) s_cfg.ntpSyncHour = (uint8_t)i;
+    }
+    if (jsonGetInt   (body, "ntpSyncMin", i)) {
+        if (i >= 0 && i <= 59) s_cfg.ntpSyncMin = (uint8_t)i;
+    }
     if (jsonGetFloat (body, "tempHighC", f))      s_cfg.tempHighC = f;
 
     if (jsonGetString(body, "qnapIp", s))         s_cfg.qnapIp = s;
@@ -2866,6 +2924,7 @@ static void handleApiConfigPost() {
     storageSave(s_cfg);
     telegramSetConfig(s_cfg);
     emailSetConfig(s_cfg);
+    ntpSetConfig(s_cfg);   // R09.6: применить новые NTP-серверы и время окна
     s_server.send(200, "application/json", "{\"ok\":true}");
 }
 
@@ -2909,10 +2968,12 @@ static void handleApiConfigResetPane() {
         s_cfg.wifiSsid = def.wifiSsid; s_cfg.wifiPass = def.wifiPass;
         s_cfg.hostname = def.hostname; s_cfg.useDhcp = def.useDhcp;
         s_cfg.ip = def.ip; s_cfg.mask = def.mask; s_cfg.gw = def.gw; s_cfg.dns = def.dns;
-        s_cfg.ntpUse = def.ntpUse;
+        // R09.6: NTP всегда включён, время окна тоже сбрасываем
         s_cfg.ntpServer1 = def.ntpServer1;
         s_cfg.ntpServer2 = def.ntpServer2;
         s_cfg.ntpTz = def.ntpTz;
+        s_cfg.ntpSyncHour = def.ntpSyncHour;
+        s_cfg.ntpSyncMin  = def.ntpSyncMin;
         s_cfg.tempHighC = def.tempHighC;
         s_cfg.battFullV = def.battFullV; s_cfg.battEmptyV = def.battEmptyV;
         s_cfg.battWarnV = def.battWarnV; s_cfg.battCapacityWh = def.battCapacityWh;
@@ -2950,6 +3011,7 @@ static void handleApiConfigResetPane() {
     storageSave(s_cfg);
     telegramSetConfig(s_cfg);
     emailSetConfig(s_cfg);
+    ntpSetConfig(s_cfg);   // R09.6
     DbgInfo("Web: config reset pane '%s'", pane.c_str());
     loggerEvent("Config reset pane '%s' via web", pane.c_str());
     s_server.send(200, "application/json", "{\"ok\":true}");
