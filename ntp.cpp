@@ -1,18 +1,24 @@
 //==============================================================
 // SNMP_FOR_DC_UPS
-// Release : R09.5
+// Release : R09.6
 // File    : ntp.cpp
 //==============================================================
 // R04.2.1: принудительный tzset() перед каждым localtime_r().
 // R07.7: убраны вызовы loggerSetTimeSource() — функция удалена.
 // R09.0: периодическая синхронизация раз в сутки в 11:30.
-// R09.5: КРИТИЧНО — doSync() теперь проверяет реальный статус
-//        SNTP через sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED,
-//        а не просто факт наличия времени в системе. Раньше при
-//        сохранённых несуществующих серверах ручная синхронизация
-//        отмечалась как успешная, хотя ответа от NTP не было.
+// R09.5: КРИТИЧНО — doSync() проверяет реальный статус SNTP
+//        через sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED.
 //        Добавлена ntpSetConfig() — применение новых серверов
 //        без перезагрузки.
+// R09.6: NTP всегда включён (поле ntpUse удалено).
+//        Окно синхронизации 1 час, время начала задаётся в UI
+//        (cfg.ntpSyncHour, cfg.ntpSyncMin).
+//        ФИКС: ntpInit() больше не ставит s_lastSyncDay при
+//        обнаружении уже установленного времени — иначе после
+//        перезагрузки в тот же день плановая синхронизация
+//        пропускалась.
+//        s_lastSyncDay обновляется даже при неудаче — чтобы
+//        не крутиться в цикле внутри окна.
 //==============================================================
 
 #include "ntp.h"
@@ -24,17 +30,17 @@
 #include <sys/time.h>
 #include <esp_sntp.h>
 
-static bool     s_ntpUse     = true;
 static bool     s_synced     = false;
 static String   s_server1;
 static String   s_server2;
 static String   s_tz;
 
-// R09.0: расписание — раз в сутки в 11:30
-static const uint8_t NTP_HOUR   = 11;
-static const uint8_t NTP_MINUTE = 30;
+// R09.6: время начала окна синхронизации (1 час)
+static uint8_t  s_syncHour   = NTP_SYNC_HOUR_DEFAULT;
+static uint8_t  s_syncMin    = NTP_SYNC_MIN_DEFAULT;
 
-// Последняя дата, когда синхронизация уже выполнялась (день месяца)
+// Последняя дата (день месяца), когда попытка плановой
+// синхронизации уже была (успешная или нет).
 static uint8_t  s_lastSyncDay = 0;
 static bool     s_forceRequested = false;
 
@@ -48,12 +54,7 @@ static void applyTz() {
 
 //--------------------------------------------------------------
 // R09.5: низкоуровневая синхронизация через SNTP-статус.
-//
-// Ключевое отличие от R09.4: раньше проверяли time(nullptr) >
-// 1600000000, что давало ложный успех, если время уже было
-// установлено в RTC-памяти. Теперь смотрим на реальный статус
-// SNTP — SNTP_SYNC_STATUS_COMPLETED достигается только после
-// получения ответа от сервера.
+// R09.6: добавлен комментарий про s_lastSyncDay (не трогаем здесь).
 //--------------------------------------------------------------
 static bool doSync(const char *reason) {
     applyTz();
@@ -68,8 +69,6 @@ static bool doSync(const char *reason) {
     uint32_t t0 = millis();
 
     while (millis() - t0 < TIMEOUT_MS) {
-        // R09.5: единственный достоверный признак успеха —
-        // SNTP-статус COMPLETED (SNTP получил ответ от сервера).
         if (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
             time_t t = time(nullptr);
             if (t > 1600000000) {
@@ -87,7 +86,6 @@ static bool doSync(const char *reason) {
         delay(200);
     }
 
-    // Таймаут без COMPLETED — значит, серверы не ответили
     DbgWarn("NTP: sync FAILED (%s), status=%d",
             reason, (int)sntp_get_sync_status());
     loggerEvent("NTP: sync FAILED (%s)", reason);
@@ -98,32 +96,34 @@ static bool doSync(const char *reason) {
 // Инициализация
 //--------------------------------------------------------------
 void ntpInit(const Config &cfg) {
-    s_ntpUse  = cfg.ntpUse;
     s_server1 = cfg.ntpServer1;
     s_server2 = cfg.ntpServer2;
     s_tz      = cfg.ntpTz;
+    s_syncHour = cfg.ntpSyncHour;
+    s_syncMin  = cfg.ntpSyncMin;
 
-    if (!s_ntpUse) {
-        DbgInfo("NTP: disabled in config");
-        return;
-    }
+    DbgInfo("NTP: init, srv1='%s' srv2='%s' TZ=%s syncAt=%02u:%02u",
+            s_server1.c_str(), s_server2.c_str(), s_tz.c_str(),
+            (unsigned)s_syncHour, (unsigned)s_syncMin);
 
     applyTz();
 
-    // R09.0: при старте синхронизируемся только если время ещё не установлено
+    // R09.6: НЕ трогаем s_lastSyncDay даже если время уже установлено.
+    // Время может сохраниться в RTC-памяти между перезагрузками,
+    // но реальной синхронизации в этот день могло не быть.
     time_t t = time(nullptr);
     if (t > 1600000000) {
         s_synced = true;
         struct tm ti;
         applyTz();
         localtime_r(&t, &ti);
-        s_lastSyncDay = ti.tm_mday;
         char buf[32];
         strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &ti);
         DbgInfo("NTP: time already set, skip init sync (%s)", buf);
         return;
     }
 
+    // Время не установлено — пробуем синхронизироваться сразу
     if (doSync("init")) {
         struct tm ti;
         time_t now = time(nullptr);
@@ -135,29 +135,50 @@ void ntpInit(const Config &cfg) {
 
 //--------------------------------------------------------------
 // R09.5: применить новую конфигурацию NTP без перезагрузки.
-// Вызывается из web при сохранении конфига.
+// R09.6: обновляет также время начала окна.
 //--------------------------------------------------------------
 void ntpSetConfig(const Config &cfg) {
-    DbgInfo("NTP: setConfig, srv1='%s' srv2='%s' tz='%s' use=%d",
+    DbgInfo("NTP: setConfig, srv1='%s' srv2='%s' tz='%s' syncAt=%02u:%02u",
             cfg.ntpServer1.c_str(),
             cfg.ntpServer2.c_str(),
             cfg.ntpTz.c_str(),
-            cfg.ntpUse ? 1 : 0);
+            (unsigned)cfg.ntpSyncHour,
+            (unsigned)cfg.ntpSyncMin);
 
-    s_ntpUse  = cfg.ntpUse;
-    s_server1 = cfg.ntpServer1;
-    s_server2 = cfg.ntpServer2;
-    s_tz      = cfg.ntpTz;
+    s_server1  = cfg.ntpServer1;
+    s_server2  = cfg.ntpServer2;
+    s_tz       = cfg.ntpTz;
+    s_syncHour = cfg.ntpSyncHour;
+    s_syncMin  = cfg.ntpSyncMin;
 
     applyTz();
+}
+
+//--------------------------------------------------------------
+// R09.6: проверка, находимся ли мы внутри окна синхронизации.
+// Окно: [s_syncHour:s_syncMin] .. +NTP_SYNC_WINDOW_MIN минут.
+//--------------------------------------------------------------
+static bool inSyncWindow(const struct tm &ti) {
+    int nowMin   = ti.tm_hour * 60 + ti.tm_min;
+    int startMin = s_syncHour * 60 + s_syncMin;
+    int endMin   = startMin + NTP_SYNC_WINDOW_MIN;   // 60 минут
+
+    // Окно не может пересекать полночь (по ТЗ — окно 1 час,
+    // разумно всегда внутри одних суток). Если пользователь
+    // поставит 23:30 — окно будет 23:30..24:29, что уже за
+    // пределами суток. Поэтому ограничим: последнее начало
+    // окна — 22:59.
+    if (endMin > 24 * 60) {
+        endMin = 24 * 60;   // обрезаем до конца суток
+    }
+
+    return (nowMin >= startMin && nowMin < endMin);
 }
 
 //--------------------------------------------------------------
 // Основной цикл
 //--------------------------------------------------------------
 void ntpLoop() {
-    if (!s_ntpUse) return;
-
     time_t t = time(nullptr);
 
     // Если время ещё не установлено — пробуем принудительно
@@ -186,17 +207,22 @@ void ntpLoop() {
         return;
     }
 
-    // R09.0: проверка расписания 11:30 раз в сутки
+    // R09.6: проверка окна синхронизации
     struct tm ti;
     applyTz();
     localtime_r(&t, &ti);
 
-    if (ti.tm_mday != s_lastSyncDay &&
-        ti.tm_hour == NTP_HOUR &&
-        ti.tm_min >= NTP_MINUTE) {
-        if (doSync("schedule 11:30")) {
-            s_lastSyncDay = ti.tm_mday;
-        }
+    if (ti.tm_mday != s_lastSyncDay && inSyncWindow(ti)) {
+        DbgInfo("NTP: schedule window reached (%02u:%02u-%02u:%02u), attempting sync",
+                (unsigned)s_syncHour, (unsigned)s_syncMin,
+                (unsigned)((s_syncHour + 1) % 24), (unsigned)s_syncMin);
+        loggerEvent("NTP: schedule window reached, attempting sync");
+
+        // R09.6: обновляем s_lastSyncDay В ЛЮБОМ СЛУЧАЕ — и при
+        // успехе, и при неудаче. Иначе внутри окна doSync() будет
+        // вызываться каждые 15 секунд до конца окна.
+        doSync("schedule");
+        s_lastSyncDay = ti.tm_mday;
     }
 }
 
@@ -204,10 +230,6 @@ void ntpLoop() {
 // Принудительная синхронизация (кнопка)
 //--------------------------------------------------------------
 void ntpForceSync() {
-    if (!s_ntpUse) {
-        DbgWarn("NTP: force sync, but NTP disabled");
-        return;
-    }
     DbgInfo("NTP: force sync requested");
     s_forceRequested = true;
 }
@@ -216,7 +238,6 @@ void ntpForceSync() {
 // Проверка синхронизации
 //--------------------------------------------------------------
 bool ntpIsSynced() {
-    if (!s_ntpUse) return false;
     return s_synced && (time(nullptr) > 1600000000);
 }
 
