@@ -1,9 +1,12 @@
 //==============================================================
 // SNMP_FOR_DC_UPS
-// Release : R01.1
+// Release : R10
 // File    : ups.cpp
 //==============================================================
 // Реализация логики ИБП.
+//
+// R10: добавлена upsFormatStatusBlock() — формирует блок статуса
+//      для уведомлений TG/EM (батарея, вход, runtime, temp, state).
 //==============================================================
 
 #include "ups.h"
@@ -213,4 +216,39 @@ bool upsUpdate(const Config &cfg,
 //--------------------------------------------------------------
 UpsStatus upsGetStatus() {
     return s_status;
+}
+
+//--------------------------------------------------------------
+// R10: блок статуса для уведомлений TG/EM.
+//--------------------------------------------------------------
+String upsFormatStatusBlock(bool withEmoji) {
+    UpsStatus st = upsGetStatus();
+
+    String s;
+    s.reserve(320);
+
+    // 🔋 Батарея: 7.774 В (73%)
+    if (withEmoji) s += "🔋 ";
+    s += "Батарея: " + String(st.batteryVolts, 3) + " В (";
+    s += String(st.batteryPercent) + "%)\n";
+
+    // ⚡ Вход:    12.131 В (OK)
+    if (withEmoji) s += "⚡ ";
+    s += "Вход:    " + String(st.inputVolts, 3) + " В (";
+    s += String(st.inputPresent ? "OK" : "LOST") + ")\n";
+
+    // ⏱ Runtime: 46 мин 49 с
+    if (withEmoji) s += "⏱ ";
+    s += "Runtime: " + String((unsigned long)(st.runtimeSec / 60)) + " мин ";
+    s += String((unsigned long)(st.runtimeSec % 60)) + " с\n";
+
+    // 🌡️ Температура CPU: 53.3 °C
+    if (withEmoji) s += "🌡️ ";
+    s += "Температура CPU: " + String(g_lastTempC, 1) + " °C\n";
+
+    // ℹ️ Состояние: NORMAL
+    if (withEmoji) s += "ℹ️ ";
+    s += "Состояние: " + String(upsStateName(st.state));
+
+    return s;
 }
