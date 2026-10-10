@@ -1,6 +1,6 @@
 //==============================================================
 // SNMP_FOR_DC_UPS
-// Release : R09.1
+// Release : R10
 // File    : logger.cpp
 //==============================================================
 // R05.2: убрано опасное пересоздание файла из writeLine().
@@ -16,6 +16,10 @@
 //        но НЕ ставит в очередь TG/EM. Нужна для внутреннего
 //        логирования из telegram.cpp/email.cpp, чтобы разорвать
 //        бесконечную рекурсию.
+// R10:   detectEvCategory() вынесена в публичный API и
+//        дополнена detectEvtResult() — автоопределение
+//        результата (удача/неудача/факт) для красивого
+//        оформления уведомлений.
 //==============================================================
 
 #include "logger.h"
@@ -226,9 +230,9 @@ void loggerLog(LogLevel level, const char *fmt, ...) {
 }
 
 //--------------------------------------------------------------
-// Определение категории уведомления
+// Определение категории уведомления (R10: публичная).
 //--------------------------------------------------------------
-static uint16_t detectEvCategory(const char *msg) {
+uint16_t detectEvCategory(const char *msg) {
     if (!msg) return 0;
 
     if (strstr(msg, "STATE ->"))        return TG_EV_POWER;
@@ -249,7 +253,51 @@ static uint16_t detectEvCategory(const char *msg) {
     if (strstr(msg, "NTP"))             return TG_EV_NTP;
     if (strstr(msg, "TEMP"))            return TG_EV_TEMP;
 
+    // R10: категории уведомлений TG/EM
+    if (strstr(msg, "TG:"))             return TG_EV_SNMP;  // переиспользуем
+    if (strstr(msg, "EM:"))             return EM_EV_SNMP;
+
     return 0;
+}
+
+//--------------------------------------------------------------
+// R10: автоопределение результата события по тексту.
+//   EVT_RES_OK   — текст содержит признаки успеха
+//   EVT_RES_FAIL — текст содержит признаки ошибки
+//   EVT_RES_FACT — нейтральное событие
+//--------------------------------------------------------------
+EvtResult detectEvtResult(const char *msg) {
+    if (!msg) return EVT_RES_FACT;
+
+    // Сначала проверяем неудачи (приоритетнее)
+    if (strstr(msg, "FAILED")     ||
+        strstr(msg, "FAIL")       ||
+        strstr(msg, "rejected")   ||
+        strstr(msg, "timeout")    ||
+        strstr(msg, "Timeout")    ||
+        strstr(msg, "CRITICAL")   ||
+        strstr(msg, "LOW_BATT")   ||
+        strstr(msg, "INPUT_LOST") ||
+        strstr(msg, "LOST")       ||
+        strstr(msg, "lost")       ||
+        strstr(msg, "error")       ||
+        strstr(msg, "Error")) {
+        return EVT_RES_FAIL;
+    }
+
+    // Затем — удачи
+    if (strstr(msg, "OK")          ||
+        strstr(msg, "sent OK")     ||
+        strstr(msg, "synced")      ||
+        strstr(msg, "connected")   ||
+        strstr(msg, "RESTORED")    ||
+        strstr(msg, "RECOVERED")   ||
+        strstr(msg, "NORMAL")) {
+        return EVT_RES_OK;
+    }
+
+    // Всё остальное — факт (без ✅/❌)
+    return EVT_RES_FACT;
 }
 
 //--------------------------------------------------------------
@@ -311,8 +359,6 @@ void loggerEventCat(uint16_t tgBit, const char *fmt, ...) {
 
 //--------------------------------------------------------------
 // R09.1: событие БЕЗ дублирования в Telegram/Email.
-// Используется внутри telegram.cpp / email.cpp при
-// логировании факта отправки, чтобы не было рекурсии.
 //--------------------------------------------------------------
 void loggerEventNoNotify(const char *fmt, ...) {
     if (!s_fsReady) return;
