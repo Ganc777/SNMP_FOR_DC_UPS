@@ -1,6 +1,6 @@
 //==============================================================
 // SNMP_FOR_DC_UPS
-// Release : R09.6
+// Release : R10
 // File    : config.h
 //==============================================================
 // Конфигурация устройства. Значения ниже — ДЕФОЛТЫ.
@@ -15,6 +15,8 @@
 // R09.6: NTP всегда включён. Время начала окна синхронизации
 //        (1 час) задаётся в конфиге — NTP_SYNC_HOUR_DEFAULT,
 //        NTP_SYNC_MIN_DEFAULT.
+// R10:   Косметический релиз. FW_RELEASE = "R10".
+//        Функциональных изменений в config.h нет.
 //==============================================================
 
 #ifndef CONFIG_H
@@ -24,7 +26,7 @@
 // 1. ИДЕНТИФИКАЦИЯ УСТРОЙСТВА
 //--------------------------------------------------------------
 #define FW_NAME              "SNMP_FOR_DC_UPS"
-#define FW_RELEASE           "R09.6"
+#define FW_RELEASE           "R10.1"
 #define FW_DEVICE_NAME       "SNMP_FOR_DC_UPS_ESP32_WEB"
 #define FW_MANUFACTURER      "Ganc777"
 #define FW_MODEL             "ESP32-ETH01 v1.4 DC UPS Monitor"
