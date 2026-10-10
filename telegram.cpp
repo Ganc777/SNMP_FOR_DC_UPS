@@ -1,17 +1,24 @@
 //==============================================================
 // SNMP_FOR_DC_UPS
-// Release : R09.1
+// Release : R10.1
 // File    : telegram.cpp
 //==============================================================
 // Отправка уведомлений через Telegram Bot API.
-// R06.1: добавлены telegramStatusCode() и telegramStatusQueue().
-// R07.0: строка "Температура CPU" вместо "Температура платы".
-// R07.7: удалены telegramSetLang() и s_lang — язык всегда "ru".
-// R09.0: периодический отчёт привязан к 12:00.
-// R09.1: логирование факта отправки — через loggerEventNoNotify()
-//        вместо loggerEventCat(). Иначе была бесконечная рекурсия
-//        (loggerEventCat → telegramNotify → sendMessage →
-//        loggerEventCat → ...).
+//
+// История:
+//   R06.1: добавлены telegramStatusCode() и telegramStatusQueue().
+//   R07.0: строка "Температура CPU" вместо "Температура платы".
+//   R07.7: удалены telegramSetLang() и s_lang — язык всегда "ru".
+//   R09.0: периодический отчёт привязан к 12:00.
+//   R09.1: логирование факта отправки — через loggerEventNoNotify()
+//          вместо loggerEventCat(). Иначе была бесконечная рекурсия.
+//   R10:   красивое оформление уведомлений:
+//          - эмодзи категории события (⚡ 🔋 ⏻ 🔄 📶 🚀 🕐 🌡️)
+//          - ✅ / ❌ в зависимости от результата (автоопределение)
+//          - тонкий разделитель ─────
+//          - блок статуса ИБП внизу каждого события
+//          - "TG: message sent OK" вместо "TG: mail sent OK"
+//   R10.1: убраны буквы за ракетой — "🚀S" → "🚀".
 //==============================================================
 
 #include "telegram.h"
@@ -151,6 +158,7 @@ String telegramStatusText() {
 //--------------------------------------------------------------
 // Отправка одной строки
 // R09.1: лог через loggerEventNoNotify — без рекурсии.
+// R10:   формулировка "TG: message sent OK".
 //--------------------------------------------------------------
 static bool sendMessage(const String &html) {
     if (!s_ready || s_bot == nullptr) return false;
@@ -159,7 +167,7 @@ static bool sendMessage(const String &html) {
 
     if (ok) {
         DbgInfo("TG: message sent");
-        loggerEventNoNotify("TG: mail sent OK");
+        loggerEventNoNotify("TG: message sent OK");
     } else {
         DbgWarn("TG: send FAILED");
         loggerEventNoNotify("TG: send FAILED");
@@ -168,23 +176,105 @@ static bool sendMessage(const String &html) {
 }
 
 //--------------------------------------------------------------
-// Формирование сообщения
+// R10: подбор эмодзи категории по биту.
+// R10.1: убраны буквы за ракетой.
+//--------------------------------------------------------------
+static const char* evtEmoji(uint16_t bit) {
+    switch (bit) {
+        case TG_EV_POWER: return "⚡";
+        case TG_EV_BATT:  return "🔋";
+        case TG_EV_WOL:   return "⏻";
+        case TG_EV_BOOT:  return "🔄";
+        case TG_EV_WIFI:  return "📶";
+        case TG_EV_SNMP:  return "🚀";
+        case TG_EV_NTP:   return "🕐";
+        case TG_EV_TEMP:  return "🌡️";
+        default:          return "ℹ️";
+    }
+}
+
+//--------------------------------------------------------------
+// R10: суффикс результата — ✅ / ❌ / пусто.
+//--------------------------------------------------------------
+static const char* evtResultSuffix(EvtResult res) {
+    switch (res) {
+        case EVT_RES_OK:   return " ✅";
+        case EVT_RES_FAIL: return " ❌";
+        default:           return "";
+    }
+}
+
+//--------------------------------------------------------------
+// R10: заголовок события — эмодзи + ✅/❌ + название.
+//--------------------------------------------------------------
+static String formatHeader(uint16_t bit, EvtResult res,
+                           const String &title) {
+    String h;
+    h.reserve(64);
+    h += evtEmoji(bit);
+    h += evtResultSuffix(res);
+    h += " <b>";
+    h += title;
+    h += "</b>";
+    return h;
+}
+
+//--------------------------------------------------------------
+// R10: тонкий разделитель.
+//--------------------------------------------------------------
+static String separator() {
+    return String("\n─────────────────\n");
+}
+
+//--------------------------------------------------------------
+// R10: футер — блок статуса ИБП + дата/время.
+//--------------------------------------------------------------
+static String formatFooter() {
+    String f;
+    f.reserve(400);
+
+    f += "\n";
+    f += upsFormatStatusBlock(true);
+    f += "\n\n<i>";
+    if (ntpIsSynced()) {
+        f += ntpDateTimeStr();
+    } else {
+        f += "up " + sysFormatDHMS(sysUptimeSec());
+    }
+    f += "</i>";
+    return f;
+}
+
+//--------------------------------------------------------------
+// R10: полное сообщение события.
+//--------------------------------------------------------------
+static String formatEventMessage(uint16_t bit, EvtResult res,
+                                 const String &title,
+                                 const String &body) {
+    String m;
+    m.reserve(600);
+
+    m += formatHeader(bit, res, title);
+    m += separator();
+    if (body.length() > 0) {
+        m += body;
+    }
+    m += formatFooter();
+    return m;
+}
+
+//--------------------------------------------------------------
+// Общее формирование сообщения (для отчётов и теста).
 //--------------------------------------------------------------
 static String formatMessage(const String &title, const String &body) {
     String m;
-    m.reserve(512);
-    m += "<b>" + title + "</b>\n";
+    m.reserve(600);
+    m += title;
+    m += separator();
     if (body.length() > 0) {
-        m += "\n";
         m += body;
     }
-    m += "\n\n<i>";
-    if (ntpIsSynced()) {
-        m += ntpDateTimeStr();
-    } else {
-        m += "up " + sysFormatDHMS(sysUptimeSec());
-    }
-    m += "</i>";
+    m += formatFooter();
     return m;
 }
 
@@ -197,9 +287,10 @@ void telegramQueueEvent(uint16_t bit, const String &title, const String &body) {
         return;
     }
 
-    String msg = formatMessage(title, body);
+    EvtResult res = detectEvtResult(body.c_str());
+    String msg = formatEventMessage(bit, res, title, body);
     queuePush(msg);
-    DbgInfo("TG: event queued (bit=0x%04X)", bit);
+    DbgInfo("TG: event queued (bit=0x%04X, res=%u)", bit, (unsigned)res);
 }
 
 void telegramNotify(uint16_t bit, const String &logLine) {
@@ -232,6 +323,9 @@ void telegramNotify(uint16_t bit, const String &logLine) {
     telegramQueueEvent(bit, title, body);
 }
 
+//--------------------------------------------------------------
+// R09.0 / R10: периодический отчёт.
+//--------------------------------------------------------------
 void telegramQueueReport(const String &lang) {
     if (!s_ready) return;
     if (!s_cfg.tgEnable) return;
@@ -243,36 +337,70 @@ void telegramQueueReport(const String &lang) {
 
     String body;
     body.reserve(400);
-    body += "Батарея: <b>" + String(st.batteryVolts, 3) + " В</b> ("
+    body += "🔋 Батарея: <b>" + String(st.batteryVolts, 3) + " В</b> ("
             + String(st.batteryPercent) + "%)\n";
-    body += "Вход:    <b>" + String(st.inputVolts, 3) + " В</b> ("
+    body += "⚡ Вход:    <b>" + String(st.inputVolts, 3) + " В</b> ("
             + String(st.inputPresent ? "OK" : "LOST") + ")\n";
-    body += "Runtime: " + String((unsigned long)(st.runtimeSec / 60))
+    body += "⏱ Runtime: " + String((unsigned long)(st.runtimeSec / 60))
             + " мин " + String((unsigned long)(st.runtimeSec % 60)) + " с\n";
-    body += "Температура CPU: " + String(g_lastTempC, 1) + " °C\n";
-    body += "Состояние: " + String(upsStateName(st.state)) + "\n";
-    body += "Uptime:  " + sysUptimeStr();
+    body += "🌡️ Температура CPU: " + String(g_lastTempC, 1) + " °C\n";
+    body += "ℹ️ Состояние: " + String(upsStateName(st.state)) + "\n";
+    body += "🕐 Uptime:  " + sysUptimeStr() + "\n";
+    body += "🌐 IP: " + wifiGetIP();
 
-    String msg = formatMessage(title, body);
-    queuePush(msg);
+    String m;
+    m.reserve(700);
+    m += "📊 <b>";
+    m += title;
+    m += "</b>";
+    m += separator();
+    m += body;
+    m += "\n\n<i>";
+    if (ntpIsSynced()) {
+        m += ntpDateTimeStr();
+    } else {
+        m += "up " + sysFormatDHMS(sysUptimeSec());
+    }
+    m += "</i>";
+
+    queuePush(m);
     DbgInfo("TG: periodic report queued");
 }
 
+//--------------------------------------------------------------
+// R10: тестовое сообщение с зелёной галочкой.
+// БЕЗ блока статуса ИБП — тест канала, не ИБП.
+//--------------------------------------------------------------
 bool telegramSendTest() {
     if (!s_ready) return false;
     if (!s_bot) return false;
 
     String title = "DC UPS: тест связи";
+
     String body;
-    body.reserve(200);
+    body.reserve(220);
     body += "Устройство <b>";
     body += FW_DEVICE_NAME;
     body += "</b> на связи.\n";
     body += "Release: " FW_RELEASE "\n";
-    body += "IP: " + wifiGetIP();
+    body += "🌐 IP: " + wifiGetIP();
 
-    String msg = formatMessage(title, body);
-    return sendMessage(msg);
+    String m;
+    m.reserve(500);
+    m += "🧪 ✅ <b>";
+    m += title;
+    m += "</b>";
+    m += separator();
+    m += body;
+    m += "\n\n<i>";
+    if (ntpIsSynced()) {
+        m += ntpDateTimeStr();
+    } else {
+        m += "up " + sysFormatDHMS(sysUptimeSec());
+    }
+    m += "</i>";
+
+    return sendMessage(m);
 }
 
 //--------------------------------------------------------------
