@@ -1,12 +1,25 @@
 //==============================================================
 // SNMP_FOR_DC_UPS
-// Release : R09.4
+// Release : R10.6
 // File    : SNMP_UPS_ESP32_WEB.ino
 //==============================================================
-// R06.0: подключён модуль Telegram, добавлена детекция
-//        превышения температуры с гистерезисом.
-//        g_lastTempC теперь живёт в system.cpp (extern в system.h).
-// R07.0: подключён модуль Email (SMTP), emailInit/emailLoop.
+// Главный скетч.
+//
+// История:
+//   R01.0: базовая инициализация, loop с ADC + UPS + SNMP.
+//   R06.0: подключён Telegram, детекция перегрева с гистерезисом.
+//   R07.0: подключён Email (SMTP).
+//   R08.4: снимок [LOG] после [EVT] — не чаще 1 раза в 60 сек.
+//   R09.1: разрыв рекурсии уведомлений (loggerEventNoNotify).
+//   R10.2: уведомления TG/EM в едином формате с блоком статуса.
+//   R10.5: сжатие событий в логе:
+//          - "STATE -> X | ..." → "STATE -> X"
+//          - "Device boot, release RXX" → "boot RXX"
+//   R10.6: формат уведомлений 10 строк. Boot-отчёт инициируется
+//          в telegramLoop()/emailLoop() через 3 сек после старта.
+//          Дополнительно boot-отчёт инициируется при загрузке
+//          через 5 сек в loop() — если очередь TG/EM готова
+//          и событие boot уже залогировано.
 //==============================================================
 
 #include "config.h"
@@ -54,7 +67,7 @@ void setup() {
     ntpInit(cfg);
 
     loggerInit();
-    loggerEvent("Device boot, release %s", FW_RELEASE);
+    loggerEvent("boot " FW_RELEASE);
 
     snmpInit(cfg);
     wolInit(cfg);
@@ -120,11 +133,9 @@ void loop() {
         wolUpdate(cfg, st);
 
         if (stateChanged) {
-            loggerEvent("STATE -> %s | BATT %.3fV (%u%%) | INPUT %.3fV | runtime %lu s",
-                        upsStateName(st.state),
-                        st.batteryVolts, st.batteryPercent,
-                        st.inputVolts,
-                        (unsigned long)st.runtimeSec);
+            // R10.5: короткий лог события. Напряжения есть в
+            // ближайшем [LOG]-снимке.
+            loggerEvent("STATE -> %s", upsStateName(st.state));
             DbgWarn("STATE -> %s | BATT %.3fV (%u%%) | INPUT %.3fV | runtime %lu s",
                     upsStateName(st.state),
                     st.batteryVolts, st.batteryPercent,
