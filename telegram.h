@@ -1,10 +1,23 @@
 //==============================================================
 // SNMP_FOR_DC_UPS
-// Release : R07.7
+// Release : R10.6
 // File    : telegram.h
 //==============================================================
 // Модуль отправки уведомлений в Telegram.
-// R07.7: удалено объявление telegramSetLang() — не использовалось.
+//
+// История:
+//   R06.0: базовый модуль Telegram (UniversalTelegramBot).
+//   R06.1: telegramStatusCode(), telegramStatusQueue().
+//   R07.7: удалены telegramSetLang() и s_lang.
+//   R09.0: периодический отчёт привязан к 12:00.
+//   R10:   красивое оформление (эмодзи, ✅/❌, разделитель).
+//   R10.2: единый формат с Email, локализация, подсветка.
+//   R10.3: диагностика маски в лог, q=%u.
+//   R10.5: фикс uptime-бага (boot после 12:00).
+//   R10.6: ЕДИНЫЙ формат для всех уведомлений — 10 строк.
+//          Добавлена telegramQueueBootReport() — boot-отчёт
+//          отправляется безусловно (без маски), отложенно
+//          на 3 сек после старта, один раз за сессию.
 //==============================================================
 
 #ifndef TELEGRAM_H
@@ -34,6 +47,9 @@ void telegramLoop();
 
 void telegramQueueEvent(uint16_t bit, const String &title, const String &body);
 void telegramQueueReport(const String &lang);
+
+// R10.6: boot-отчёт (безусловный, 10 строк, заголовок 🔄)
+void telegramQueueBootReport();
 
 bool telegramSendTest();
 bool telegramIsReady();
