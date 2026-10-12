@@ -1,10 +1,15 @@
 //==============================================================
 // SNMP_FOR_DC_UPS
-// Release : R01.3
+// Release : R10.5
 // File    : snmp.cpp
 //==============================================================
-// Версия с исправленным OID upsOutputSource (RFC 1628: 1.4.1.0)
-// и ловушкой с varbinds для QNAP.
+// SNMP-агент: стандартный UPS MIB (RFC 1628) + приватная ветка.
+//
+// История:
+//   R01.0: базовый SNMP-агент.
+//   R01.1: фикс OID upsOutputSource, ловушка с varbinds.
+//   R01.3: исправлен OID upsOutputSource (RFC 1628: 1.4.1.0).
+//   R10.5: сжатие лога — "SNMP event sent: X" → "SNMP: X".
 //==============================================================
 
 #include "snmp.h"
@@ -27,7 +32,7 @@ static int  s_upsBatteryStatus     = 2;
 static int  s_upsSecondsOnBattery  = 0;
 static int  s_upsEstimatedMinutes  = 0;
 static int  s_upsEstimatedCharge   = 0;
-static int  s_upsOutputSource      = 3; // 3=normal, 5=battery
+static int  s_upsOutputSource      = 3;
 static int  s_upsAlarmsPresent     = 0;
 static int  s_upsInputVoltage      = 0;
 static int  s_upsOutputVoltage     = 0;
@@ -71,12 +76,12 @@ DEF_DYN_INT(dyn_upsBatteryStatus,     s_upsBatteryStatus,     ".1.3.6.1.2.1.33.1
 DEF_DYN_INT(dyn_upsSecondsOnBattery,  s_upsSecondsOnBattery,  ".1.3.6.1.2.1.33.1.2.2.0")
 DEF_DYN_INT(dyn_upsEstimatedMinutes,  s_upsEstimatedMinutes,  ".1.3.6.1.2.1.33.1.2.3.0")
 DEF_DYN_INT(dyn_upsEstimatedCharge,   s_upsEstimatedCharge,   ".1.3.6.1.2.1.33.1.2.4.0")
-DEF_DYN_INT(dyn_upsOutputSource,      s_upsOutputSource,      ".1.3.6.1.2.1.33.1.4.1.0") // ИСПРАВЛЕНО
+DEF_DYN_INT(dyn_upsOutputSource,      s_upsOutputSource,      ".1.3.6.1.2.1.33.1.4.1.0")
 DEF_DYN_INT(dyn_upsInputVoltage,      s_upsInputVoltage,      ".1.3.6.1.2.1.33.1.3.3.1.5.1")
 DEF_DYN_INT(dyn_upsOutputVoltage,     s_upsOutputVoltage,     ".1.3.6.1.2.1.33.1.4.4.1.2.1")
 DEF_DYN_INT(dyn_upsOutputCurrent,     s_upsOutputCurrent,     ".1.3.6.1.2.1.33.1.4.4.1.3.1")
 DEF_DYN_INT(dyn_upsOutputPercentLoad, s_upsOutputPercentLoad, ".1.3.6.1.2.1.33.1.4.4.1.5.1")
-DEF_DYN_INT(dyn_upsAlarmsPresent,     s_upsAlarmsPresent,     ".1.3.6.1.2.1.33.1.4.2.0") // Перенесён
+DEF_DYN_INT(dyn_upsAlarmsPresent,     s_upsAlarmsPresent,     ".1.3.6.1.2.1.33.1.4.2.0")
 
 // Приватные
 DEF_DYN_INT(dyn_pvBatteryMv,       s_pvBatteryMv,       "PRIV.1.1.0")
@@ -249,10 +254,12 @@ void snmpSendEvent(UpsSnmpEvent evt) {
             case UPS_SNMP_EVT_BATT_RECOVERED: name = "BATT_RECOVERED"; break;
             default: break;
         }
-        DbgInfo("SNMP: event '%s' sent to %s (reqId=%ld)", name, qnapIp.toString().c_str(), (long)reqId);
-        loggerEvent("SNMP event sent: %s", name);
+        DbgInfo("SNMP: event '%s' sent to %s (reqId=%ld)",
+                name, qnapIp.toString().c_str(), (long)reqId);
+        // R10.5: сжатие — было "SNMP event sent: X", стало "SNMP: X"
+        loggerEvent("SNMP: %s", name);
     } else {
         DbgWarn("SNMP: failed to send event");
-        loggerEvent("SNMP event send FAILED");
+        loggerEvent("SNMP FAIL");
     }
 }
