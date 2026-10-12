@@ -1,35 +1,32 @@
 //==============================================================
 // SNMP_FOR_DC_UPS
-// Release : R10.1
+// Release : R10.6
 // File    : email.cpp
 //==============================================================
-// Отправка уведомлений по Email (SMTP).
-// Ручной SMTP-диалог через WiFiClientSecure (implicit TLS).
+// Отправка уведомлений по Email (SMTP). Единый формат — 10 строк.
 //
 // История:
-//   R07.1: AUTH PLAIN + fallback на AUTH LOGIN, диагностика SMTP.
+//   R07.1: AUTH PLAIN + fallback на AUTH LOGIN.
 //   R07.2: диагностика emailInit/emailSetConfig/emailSendTest.
-//   R07.7: удалены emailSetLang() и s_lang — язык всегда "ru".
+//   R07.7: удалены emailSetLang() и s_lang.
 //   R09.0: периодический отчёт привязан к 12:00.
 //   R09.1: КРИТИЧНО — все вызовы loggerEventCat(EM_EV_NTP, ...)
-//          заменены на loggerEventNoNotify(). Иначе была
-//          бесконечная рекурсия: loggerEventCat → emailNotify →
-//          очередь → smtpSendMail → loggerEventCat → ...
-//   R10:   - SMTP-лог почищен: промежуточные шаги убраны,
-//            остались только:
-//              "EM: mail sent OK"           — при успехе
-//              "EM: send FAILED (этап)"     — при ошибке
-//          - Красивое оформление писем:
-//              * эмодзи категории (⚡ 🔋 ⏻ 🔄 📶 🚀 🕐 🌡️)
-//              * ✅ / ❌ — автоопределение по тексту события
-//              * тонкий разделитель ─────
-//              * блок статуса ИБП в серой рамке
-//              * цветной заголовок (зелёный/красный/синий)
-//          - Тестовое письмо: заголовок с 🧪 ✅, БЕЗ блока статуса.
-//   R10.1: - убраны буквы за ракетой — "🚀S" → "🚀".
-//          - В периодическом отчёте строки обёрнуты в <div>,
-//            чтобы гарантированно отображаться в столбик во всех
-//            email-клиентах (в т.ч. Mail.ru web).
+//          заменены на loggerEventNoNotify().
+//   R10:   SMTP-лог почищен; красивое оформление писем.
+//   R10.2: единый формат с Telegram; локализация; подсветка.
+//   R10.3: ФИКС БАГА — emailNotify() с пустым title → sep==0
+//          → пропуск. Решение: subject в emailQueueEvent(),
+//          разделитель — '\x01'.
+//   R10.4: периодический отчёт — без рамки.
+//   R10.5: фикс uptime-бага (boot после 12:00).
+//   R10.6: ЕДИНЫЙ формат для всех уведомлений — 10 строк:
+//          Батарея, Вход, Runtime, Температура, Состояние,
+//          NTP, Пропадания, Uptime, IP, Release.
+//          Заголовок с эмодзи категории + ✅/❌.
+//          - Периодический отчёт: 📊
+//          - Boot-отчёт: 🔄, безусловно, отложенно на 3 сек.
+//          - Тест: 🧪 ✅.
+//          Счётчик пропаданий сбрасывается в отчёте и boot.
 //==============================================================
 
 #include "email.h"
@@ -56,15 +53,22 @@ static uint8_t  s_qHead = 0;
 static uint8_t  s_qTail = 0;
 static uint8_t  s_qCount = 0;
 
-// R09.0: последняя дата отправки периодического отчёта
 static uint8_t  s_lastReportDay  = 0;
 static uint8_t  s_lastReportMon  = 0;
 static uint16_t s_lastReportYear = 0;
 
 static const uint8_t REPORT_HOUR = 12;
 
+// Разделитель subject / html в очереди (не встречается в тексте)
+static const char EM_SEP = '\x01';
+
+// R10.6: одноразовый boot-отчёт
+static bool     s_bootReportDone = false;
+static uint32_t s_bootAtMs       = 0;
+static const uint32_t BOOT_REPORT_DELAY_MS = 3000UL;
+
 //--------------------------------------------------------------
-// Работа с очередью
+// Очередь
 //--------------------------------------------------------------
 static bool queuePush(const String &msg) {
     if (s_qCount >= EM_QUEUE_SIZE_LOCAL) {
@@ -158,8 +162,7 @@ static bool smtpSend(WiFiClientSecure &c, const String &cmd) {
 }
 
 //--------------------------------------------------------------
-// R10: подбор эмодзи категории по биту.
-// R10.1: убраны буквы за ракетой.
+// Эмодзи категории
 //--------------------------------------------------------------
 static const char* emEvtEmoji(uint16_t bit) {
     switch (bit) {
@@ -176,7 +179,7 @@ static const char* emEvtEmoji(uint16_t bit) {
 }
 
 //--------------------------------------------------------------
-// R10: суффикс результата — ✅ / ❌ / пусто.
+// Суффикс результата
 //--------------------------------------------------------------
 static const char* emEvtResultSuffix(EvtResult res) {
     switch (res) {
@@ -187,7 +190,25 @@ static const char* emEvtResultSuffix(EvtResult res) {
 }
 
 //--------------------------------------------------------------
-// R10: разделитель.
+// Заголовок-фолбэк по категории
+//--------------------------------------------------------------
+static String categoryTitle(uint16_t bit, const String &lang) {
+    bool en = (lang == "en");
+    switch (bit) {
+        case EM_EV_POWER: return en ? "Power"       : "Питание";
+        case EM_EV_BATT:  return en ? "Battery"     : "Батарея";
+        case EM_EV_WOL:   return "WoL";
+        case EM_EV_BOOT:  return en ? "Reboot"      : "Перезагрузка";
+        case EM_EV_WIFI:  return "Wi-Fi";
+        case EM_EV_SNMP:  return "SNMP";
+        case EM_EV_NTP:   return "NTP";
+        case EM_EV_TEMP:  return en ? "Temperature" : "Температура";
+        default:          return en ? "Event"       : "Событие";
+    }
+}
+
+//--------------------------------------------------------------
+// Разделитель
 //--------------------------------------------------------------
 static String emSeparator() {
     return String("<div style=\"color:#888;margin:8px 0;\">"
@@ -195,34 +216,71 @@ static String emSeparator() {
 }
 
 //--------------------------------------------------------------
-// R10: футер — блок статуса ИБП в серой рамке + дата/время.
+// Разметка [H]...[/H] → <span style="color:...">...</span>
 //--------------------------------------------------------------
-static String emFooter() {
-    String f;
-    f.reserve(600);
+static String applyHighlight(const String &in, EvtResult res) {
+    const char *color = "#0066cc";
+    if (res == EVT_RES_OK)   color = "#3ecb6e";
+    if (res == EVT_RES_FAIL) color = "#e84c3c";
 
-    // Блок статуса в серой рамке
-    f += "<div style=\"background:#f5f5f5;border-left:3px solid #888;"
-         "padding:10px 14px;margin:14px 0;"
-         "font-family:Consolas,Monaco,monospace;font-size:13px;"
-         "color:#333;white-space:pre-wrap;line-height:1.5;\">";
-    f += upsFormatStatusBlock(true);
-    f += "</div>";
-
-    // Дата/время
-    f += "<div style=\"font-size:12px;color:#888;\">";
-    if (ntpIsSynced()) {
-        f += ntpDateTimeStr();
-    } else {
-        f += "up " + sysFormatDHMS(sysUptimeSec());
+    String out;
+    out.reserve(in.length() + 32);
+    int pos = 0;
+    while (pos < (int)in.length()) {
+        int h1 = in.indexOf("[H]", pos);
+        if (h1 < 0) {
+            out += in.substring(pos);
+            break;
+        }
+        out += in.substring(pos, h1);
+        int h2 = in.indexOf("[/H]", h1);
+        if (h2 < 0) {
+            out += in.substring(h1);
+            break;
+        }
+        out += "<span style=\"color:";
+        out += color;
+        out += ";font-weight:bold;\">";
+        out += in.substring(h1 + 3, h2);
+        out += "</span>";
+        pos = h2 + 4;
     }
-    f += "</div>";
+    return out;
+}
 
+//--------------------------------------------------------------
+// R10.6: тело из 10 строк в HTML (каждая строка — <div>).
+//--------------------------------------------------------------
+static String emBody10Html(const String &lang, uint16_t highlightCat,
+                           EvtResult res) {
+    String body = upsBuildBody10(lang, true, highlightCat);
+    body = applyHighlight(body, res);
+
+    String f;
+    f.reserve(body.length() + 200);
+
+    int pos = 0;
+    while (pos < (int)body.length()) {
+        int nl = body.indexOf('\n', pos);
+        String line;
+        if (nl < 0) {
+            line = body.substring(pos);
+            pos = body.length();
+        } else {
+            line = body.substring(pos, nl);
+            pos = nl + 1;
+        }
+        if (line.length() > 0) {
+            f += "<div>";
+            f += line;
+            f += "</div>";
+        }
+    }
     return f;
 }
 
 //--------------------------------------------------------------
-// R10: только дата/время (без блока статуса) — для теста.
+// Только дата
 //--------------------------------------------------------------
 static String emTimestampOnly() {
     String f;
@@ -237,15 +295,15 @@ static String emTimestampOnly() {
 }
 
 //--------------------------------------------------------------
-// Формирование HTML-письма.
-//   withFooter == true  → блок статуса ИБП + дата/время
-//   withFooter == false → только дата/время (тест)
+// Формирование HTML-письма: заголовок + разделитель + 10 строк + дата
 //--------------------------------------------------------------
-static String formatHtmlMessage(const String &title, const String &body,
-                                const char *titleColor = "#0066cc",
-                                bool withFooter = true) {
+static String formatHtmlMessage(const String &headerHtml,
+                                const char *titleColor,
+                                const String &lang,
+                                uint16_t highlightCat,
+                                EvtResult res) {
     String m;
-    m.reserve(1400);
+    m.reserve(1800);
 
     m += "<html><body style=\"font-family:Arial,sans-serif;"
          "font-size:14px;color:#222;\">";
@@ -253,53 +311,18 @@ static String formatHtmlMessage(const String &title, const String &body,
     m += "<h3 style=\"margin:0 0 10px 0;color:";
     m += titleColor;
     m += ";\">";
-    m += title;
+    m += headerHtml;
     m += "</h3>";
 
     m += emSeparator();
-
-    if (body.length() > 0) {
-        m += "<div style=\"white-space:pre-wrap;line-height:1.5;\">";
-        m += body;
-        m += "</div>";
-    }
-
-    if (withFooter) {
-        m += emFooter();
-    } else {
-        m += emTimestampOnly();
-    }
-
+    m += emBody10Html(lang, highlightCat, res);
+    m += emTimestampOnly();
     m += "</body></html>";
     return m;
 }
 
 //--------------------------------------------------------------
-// R10: формирование HTML-письма для события.
-//--------------------------------------------------------------
-static String formatEventHtml(uint16_t bit, EvtResult res,
-                              const String &title, const String &body) {
-    // Цвет заголовка по результату
-    const char *color = "#0066cc";   // синий — факт
-    if (res == EVT_RES_OK)   color = "#3ecb6e";   // зелёный
-    if (res == EVT_RES_FAIL) color = "#e84c3c";   // красный
-
-    String h;
-    h.reserve(80);
-    h += emEvtEmoji(bit);
-    h += emEvtResultSuffix(res);
-    h += " DC UPS: ";
-    h += title;
-
-    return formatHtmlMessage(h, body, color, true);
-}
-
-//--------------------------------------------------------------
-// Собственно отправка письма.
-// R09.1: логирование — через loggerEventNoNotify().
-// R10:   почищен SMTP-лог. Остаются только итоговые строки:
-//          "EM: mail sent OK"           — при успехе
-//          "EM: send FAILED (этап)"     — при ошибке
+// Отправка письма
 //--------------------------------------------------------------
 static bool smtpSendMail(const String &subject, const String &htmlBody) {
     if (!s_ready) return false;
@@ -316,39 +339,36 @@ static bool smtpSendMail(const String &subject, const String &htmlBody) {
     if (!client.connect(s_cfg.emSmtpHost.c_str(), s_cfg.emSmtpPort)) {
         DbgWarn("EM: TCP connect FAILED (heap=%u)",
                 (unsigned)ESP.getFreeHeap());
-        loggerEventNoNotify("EM: send FAILED (TCP connect)");
+        loggerEventNoNotify("EM:FAIL (TCP connect)");
         return false;
     }
 
     String raw;
     if (!smtpWaitCode(client, "220", EM_SEND_TIMEOUT_MS, &raw)) {
-        loggerEventNoNotify("EM: send FAILED (greeting)");
+        loggerEventNoNotify("EM:FAIL (greeting)");
         client.stop();
         return false;
     }
 
     if (!smtpSend(client, "EHLO " FW_DEVICE_NAME)) {
         client.stop();
-        loggerEventNoNotify("EM: send FAILED (EHLO send)");
+        loggerEventNoNotify("EM:FAIL (EHLO send)");
         return false;
     }
     if (!smtpWaitCode(client, "250", EM_SEND_TIMEOUT_MS, &raw)) {
         DbgWarn("EM: EHLO failed, trying HELO");
         if (!smtpSend(client, "HELO " FW_DEVICE_NAME)) {
             client.stop();
-            loggerEventNoNotify("EM: send FAILED (HELO send)");
+            loggerEventNoNotify("EM:FAIL (HELO send)");
             return false;
         }
         if (!smtpWaitCode(client, "250", EM_SEND_TIMEOUT_MS, &raw)) {
-            loggerEventNoNotify("EM: send FAILED (EHLO/HELO)");
+            loggerEventNoNotify("EM:FAIL (EHLO/HELO)");
             client.stop();
             return false;
         }
     }
 
-    //----------------------------------------------------------
-    // AUTH: сначала PLAIN, при отказе — LOGIN
-    //----------------------------------------------------------
     bool authOk = false;
     String authErr;
 
@@ -358,7 +378,7 @@ static bool smtpSendMail(const String &subject, const String &htmlBody) {
         size_t payloadLen = 1 + user.length() + 1 + pass.length();
         uint8_t *payload = (uint8_t *)malloc(payloadLen);
         if (!payload) {
-            loggerEventNoNotify("EM: send FAILED (AUTH malloc)");
+            loggerEventNoNotify("EM:FAIL (AUTH malloc)");
             client.stop();
             return false;
         }
@@ -371,14 +391,14 @@ static bool smtpSendMail(const String &subject, const String &htmlBody) {
         free(payload);
 
         if (plainB64.length() == 0) {
-            loggerEventNoNotify("EM: send FAILED (AUTH base64)");
+            loggerEventNoNotify("EM:FAIL (AUTH base64)");
             client.stop();
             return false;
         }
 
         if (!smtpSend(client, "AUTH PLAIN " + plainB64)) {
             client.stop();
-            loggerEventNoNotify("EM: send FAILED (AUTH PLAIN send)");
+            loggerEventNoNotify("EM:FAIL (AUTH PLAIN send)");
             return false;
         }
 
@@ -417,43 +437,43 @@ static bool smtpSendMail(const String &subject, const String &htmlBody) {
     if (!authOk && authErr == "fallback") {
         if (!smtpSend(client, "AUTH LOGIN")) {
             client.stop();
-            loggerEventNoNotify("EM: send FAILED (AUTH LOGIN send)");
+            loggerEventNoNotify("EM:FAIL (AUTH LOGIN send)");
             return false;
         }
         if (!smtpWaitCode(client, "334", EM_SEND_TIMEOUT_MS, &raw)) {
-            loggerEventNoNotify("EM: send FAILED (AUTH LOGIN rejected)");
+            loggerEventNoNotify("EM:FAIL (AUTH LOGIN rejected)");
             client.stop();
             return false;
         }
         String userB64 = b64Encode(s_cfg.emUser);
         if (userB64.length() == 0) {
             client.stop();
-            loggerEventNoNotify("EM: send FAILED (AUTH LOGIN user b64)");
+            loggerEventNoNotify("EM:FAIL (AUTH LOGIN user b64)");
             return false;
         }
         if (!smtpSend(client, userB64)) {
             client.stop();
-            loggerEventNoNotify("EM: send FAILED (AUTH LOGIN user send)");
+            loggerEventNoNotify("EM:FAIL (AUTH LOGIN user send)");
             return false;
         }
         if (!smtpWaitCode(client, "334", EM_SEND_TIMEOUT_MS, &raw)) {
-            loggerEventNoNotify("EM: send FAILED (AUTH LOGIN user rejected)");
+            loggerEventNoNotify("EM:FAIL (AUTH LOGIN user rejected)");
             client.stop();
             return false;
         }
         String passB64 = b64Encode(s_cfg.emPass);
         if (passB64.length() == 0) {
             client.stop();
-            loggerEventNoNotify("EM: send FAILED (AUTH LOGIN pass b64)");
+            loggerEventNoNotify("EM:FAIL (AUTH LOGIN pass b64)");
             return false;
         }
         if (!smtpSend(client, passB64)) {
             client.stop();
-            loggerEventNoNotify("EM: send FAILED (AUTH LOGIN pass send)");
+            loggerEventNoNotify("EM:FAIL (AUTH LOGIN pass send)");
             return false;
         }
         if (!smtpWaitCode(client, "235", EM_SEND_TIMEOUT_MS, &raw)) {
-            loggerEventNoNotify("EM: send FAILED (AUTH)");
+            loggerEventNoNotify("EM:FAIL (AUTH)");
             client.stop();
             return false;
         }
@@ -462,7 +482,7 @@ static bool smtpSendMail(const String &subject, const String &htmlBody) {
 
     if (!authOk) {
         DbgWarn("EM: AUTH failed (%s)", authErr.c_str());
-        loggerEventNoNotify("EM: send FAILED (AUTH)");
+        loggerEventNoNotify("EM:FAIL (AUTH)");
         client.stop();
         return false;
     }
@@ -470,35 +490,35 @@ static bool smtpSendMail(const String &subject, const String &htmlBody) {
     String from = s_cfg.emFrom.length() ? s_cfg.emFrom : s_cfg.emUser;
     if (!smtpSend(client, "MAIL FROM:<" + from + ">")) {
         client.stop();
-        loggerEventNoNotify("EM: send FAILED (MAIL FROM send)");
+        loggerEventNoNotify("EM:FAIL (MAIL FROM send)");
         return false;
     }
     if (!smtpWaitCode(client, "250", EM_SEND_TIMEOUT_MS, &raw)) {
-        loggerEventNoNotify("EM: send FAILED (MAIL FROM)");
+        loggerEventNoNotify("EM:FAIL (MAIL FROM)");
         client.stop();
         return false;
     }
 
     if (!smtpSend(client, "RCPT TO:<" + s_cfg.emTo + ">")) {
         client.stop();
-        loggerEventNoNotify("EM: send FAILED (RCPT TO send)");
+        loggerEventNoNotify("EM:FAIL (RCPT TO send)");
         return false;
     }
     if (!smtpWaitCode(client, "250", EM_SEND_TIMEOUT_MS, &raw)) {
         String code = (raw.length() >= 3) ? raw.substring(0, 3) : "?";
         DbgWarn("EM: RCPT TO rejected, code=%s", code.c_str());
-        loggerEventNoNotify("EM: send FAILED (RCPT TO)");
+        loggerEventNoNotify("EM:FAIL (RCPT TO)");
         client.stop();
         return false;
     }
 
     if (!smtpSend(client, "DATA")) {
         client.stop();
-        loggerEventNoNotify("EM: send FAILED (DATA send)");
+        loggerEventNoNotify("EM:FAIL (DATA send)");
         return false;
     }
     if (!smtpWaitCode(client, "354", EM_SEND_TIMEOUT_MS, &raw)) {
-        loggerEventNoNotify("EM: send FAILED (DATA)");
+        loggerEventNoNotify("EM:FAIL (DATA)");
         client.stop();
         return false;
     }
@@ -516,7 +536,7 @@ static bool smtpSendMail(const String &subject, const String &htmlBody) {
     client.flush();
 
     if (!smtpWaitCode(client, "250", EM_SEND_TIMEOUT_MS, &raw)) {
-        loggerEventNoNotify("EM: send FAILED (message rejected)");
+        loggerEventNoNotify("EM:FAIL (message rejected)");
         client.stop();
         return false;
     }
@@ -525,8 +545,25 @@ static bool smtpSendMail(const String &subject, const String &htmlBody) {
     client.stop();
 
     DbgInfo("EM: mail sent OK (heap=%u)", (unsigned)ESP.getFreeHeap());
-    loggerEventNoNotify("EM: mail sent OK");
+    loggerEventNoNotify("EM:OK");
     return true;
+}
+
+//--------------------------------------------------------------
+// R10.5: отметить день как «уже отправлен», если boot после 12:00.
+//--------------------------------------------------------------
+static void markTodayAsReportedIfLate() {
+    if (!ntpIsSynced()) return;
+    time_t now = time(nullptr);
+    struct tm ti;
+    localtime_r(&now, &ti);
+    if (ti.tm_hour >= REPORT_HOUR) {
+        s_lastReportDay  = ti.tm_mday;
+        s_lastReportMon  = ti.tm_mon + 1;
+        s_lastReportYear = ti.tm_year + 1900;
+        DbgInfo("EM: boot after %u:00 — today marked as reported",
+                (unsigned)REPORT_HOUR);
+    }
 }
 
 //--------------------------------------------------------------
@@ -535,6 +572,8 @@ static bool smtpSendMail(const String &subject, const String &htmlBody) {
 void emailInit(const Config &cfg) {
     s_cfg = cfg;
     s_ready = false;
+    s_bootAtMs = millis();
+    s_bootReportDone = false;
 
     if (!cfg.emEnable) {
         DbgInfo("EM: disabled in config");
@@ -549,6 +588,8 @@ void emailInit(const Config &cfg) {
     }
 
     s_ready = true;
+
+    markTodayAsReportedIfLate();
 
     DbgInfo("EM: ready, %s:%u, user=%s, to=%s, period=%u, events=0x%04X",
             cfg.emSmtpHost.c_str(), (unsigned)cfg.emSmtpPort,
@@ -597,28 +638,50 @@ String emailStatusText() {
 }
 
 //--------------------------------------------------------------
-// Постановка события в очередь.
-// R10: определяем результат по тексту и формируем красивое письмо.
+// Постановка события в очередь
 //--------------------------------------------------------------
 void emailQueueEvent(uint16_t bit, const String &title, const String &body) {
     if (!s_ready) return;
     if (!s_cfg.emEnable) return;
 
     if ((s_cfg.emEvents & bit) == 0) {
-        DbgVerb("EM: event 0x%04X disabled in mask", bit);
+        loggerLog(LOGLEVEL_WARN, "EM: event 0x%04X disabled in mask", bit);
         return;
     }
 
     EvtResult res = detectEvtResult(body.c_str());
-    String html = formatEventHtml(bit, res, title, body);
+
+    // Заголовок события
+    String evtTitle = detectEvtTitle(body.c_str(), s_cfg.uiLang);
+    if (evtTitle.length() == 0) {
+        evtTitle = categoryTitle(bit, s_cfg.uiLang);
+    }
+
+    const char *color = "#0066cc";
+    if (res == EVT_RES_OK)   color = "#3ecb6e";
+    if (res == EVT_RES_FAIL) color = "#e84c3c";
+
+    String header;
+    header.reserve(96);
+    header += emEvtEmoji(bit);
+    header += emEvtResultSuffix(res);
+    header += " DC UPS: ";
+    header += evtTitle;
+
+    // Subject (без HTML, без цвета)
+    String subject = header;
+
+    String html = formatHtmlMessage(header, color, s_cfg.uiLang, bit, res);
 
     String item;
-    item.reserve(html.length() + title.length() + 16);
-    item += title;
-    item += "\n";
+    item.reserve(subject.length() + html.length() + 4);
+    item += subject;
+    item += EM_SEP;
     item += html;
+
     queuePush(item);
-    DbgInfo("EM: event queued (bit=0x%04X, res=%u)", bit, (unsigned)res);
+    DbgInfo("EM: event queued (bit=0x%04X, res=%u, q=%u)",
+            bit, (unsigned)res, (unsigned)s_qCount);
 }
 
 //--------------------------------------------------------------
@@ -627,101 +690,91 @@ void emailQueueEvent(uint16_t bit, const String &title, const String &body) {
 void emailNotify(uint16_t bit, const String &logLine) {
     if (!s_ready) return;
     if (!s_cfg.emEnable) return;
-
-    String title;
-    switch (bit) {
-        case EM_EV_POWER: title = "Питание";      break;
-        case EM_EV_BATT:  title = "Батарея";      break;
-        case EM_EV_WOL:   title = "WoL";          break;
-        case EM_EV_BOOT:  title = "Перезагрузка"; break;
-        case EM_EV_WIFI:  title = "Wi-Fi";        break;
-        case EM_EV_SNMP:  title = "SNMP";         break;
-        case EM_EV_NTP:   title = "NTP";          break;
-        case EM_EV_TEMP:  title = "Температура";  break;
-        default:          title = "";             break;
-    }
-
-    String body;
-    body.reserve(logLine.length() + 16);
-    for (size_t i = 0; i < logLine.length(); i++) {
-        char c = logLine[i];
-        if (c == '<')      body += "&lt;";
-        else if (c == '>') body += "&gt;";
-        else if (c == '&') body += "&amp;";
-        else               body += c;
-    }
-
-    emailQueueEvent(bit, title, body);
+    emailQueueEvent(bit, String(), logLine);
 }
 
 //--------------------------------------------------------------
-// R09.0 / R10 / R10.1: периодический отчёт.
-// R10.1: каждая строка обёрнута в <div>, чтобы гарантированно
-//        отображаться в столбик во всех email-клиентах.
+// R10.6: периодический отчёт — 📊, 10 строк.
+// Сброс счётчика пропаданий.
 //--------------------------------------------------------------
 void emailQueueReport(const String &lang) {
     if (!s_ready) return;
     if (!s_cfg.emEnable) return;
     if (s_cfg.emPeriod == 0) return;
 
-    UpsStatus st = upsGetStatus();
+    String title = i18n("periodic_report", lang);
 
-    String title = "DC UPS: периодический отчёт";
+    String header;
+    header.reserve(96);
+    header += "📊 DC UPS: ";
+    header += title;
 
-    String body;
-    body.reserve(700);
-    body += "<div>🔋 Батарея: " + String(st.batteryVolts, 3) + " В ("
-            + String(st.batteryPercent) + "%)</div>";
-    body += "<div>⚡ Вход:    " + String(st.inputVolts, 3) + " В ("
-            + String(st.inputPresent ? "OK" : "LOST") + ")</div>";
-    body += "<div>⏱ Runtime: " + String((unsigned long)(st.runtimeSec / 60))
-            + " мин " + String((unsigned long)(st.runtimeSec % 60)) + " с</div>";
-    body += "<div>🌡️ Температура CPU: " + String(g_lastTempC, 1) + " °C</div>";
-    body += "<div>ℹ️ Состояние: " + String(upsStateName(st.state)) + "</div>";
-    body += "<div>🕐 Uptime:  " + sysUptimeStr() + "</div>";
-    body += "<div>🌐 IP: " + wifiGetIP() + "</div>";
-
-    String h;
-    h.reserve(80);
-    h += "📊 DC UPS: периодический отчёт";
-
-    String html = formatHtmlMessage(h, body, "#0066cc", true);
+    String html = formatHtmlMessage(header, "#0066cc", lang, 0, EVT_RES_FACT);
 
     String item;
-    item.reserve(html.length() + title.length() + 16);
-    item += title;
-    item += "\n";
+    item.reserve(header.length() + html.length() + 4);
+    item += header;
+    item += EM_SEP;
     item += html;
+
     queuePush(item);
     DbgInfo("EM: periodic report queued");
+
+    upsResetPowerLossCount();
 }
 
 //--------------------------------------------------------------
-// R10: тестовое письмо — с зелёной галочкой, БЕЗ блока статуса.
+// R10.6: boot-отчёт — 🔄, 10 строк.
+// Безусловно, один раз после boot (см. emailLoop).
+// Сброс счётчика пропаданий.
+//--------------------------------------------------------------
+void emailQueueBootReport() {
+    if (!s_ready) return;
+    if (!s_cfg.emEnable) return;
+
+    bool en = (s_cfg.uiLang == "en");
+    String title = en ? "Reboot" : "Перезагрузка";
+
+    String header;
+    header.reserve(96);
+    header += "🔄 DC UPS: ";
+    header += title;
+
+    String html = formatHtmlMessage(header, "#0066cc", s_cfg.uiLang, 0, EVT_RES_FACT);
+
+    String item;
+    item.reserve(header.length() + html.length() + 4);
+    item += header;
+    item += EM_SEP;
+    item += html;
+
+    queuePush(item);
+    DbgInfo("EM: boot report queued");
+
+    upsResetPowerLossCount();
+}
+
+//--------------------------------------------------------------
+// R10.6: тест — 🧪 ✅, 10 строк.
 //--------------------------------------------------------------
 bool emailSendTest() {
     if (!s_ready) return false;
 
-    String title = "DC UPS: тест связи";
+    String lang = s_cfg.uiLang;
+    String title = i18n("test_link", lang);
 
-    String body;
-    body.reserve(220);
-    body += "Устройство " FW_DEVICE_NAME " на связи.\n";
-    body += "Release: " FW_RELEASE "\n";
-    body += "🌐 IP: " + wifiGetIP();
+    String header;
+    header.reserve(96);
+    header += "🧪 ✅ DC UPS: ";
+    header += title;
 
-    String h;
-    h.reserve(80);
-    h += "🧪 ✅ DC UPS: тест связи";
-
-    // withFooter = false → без блока статуса ИБП, только дата/время
-    String html = formatHtmlMessage(h, body, "#3ecb6e", false);
-    String subject = "[DC UPS] " + title;
+    String html = formatHtmlMessage(header, "#3ecb6e", lang, 0, EVT_RES_OK);
+    String subject = header;
     return smtpSendMail(subject, html);
 }
 
 //--------------------------------------------------------------
-// R09.0: проверка расписания периодического отчёта
+// Проверка расписания периодического отчёта
 //--------------------------------------------------------------
 static bool reportDueToday(struct tm &ti) {
     if (ti.tm_hour < REPORT_HOUR) return false;
@@ -750,15 +803,24 @@ static bool reportDueToday(struct tm &ti) {
 void emailLoop() {
     if (!s_ready) return;
 
+    // R10.6: boot-отчёт через 3 сек после старта — один раз
+    if (!s_bootReportDone &&
+        (uint32_t)(millis() - s_bootAtMs) >= BOOT_REPORT_DELAY_MS) {
+        s_bootReportDone = true;
+        emailQueueBootReport();
+    }
+
     String item;
     if (queuePop(item)) {
-        int sep = item.indexOf('\n');
+        int sep = item.indexOf(EM_SEP);
         if (sep > 0) {
-            String subject = "[DC UPS] " + item.substring(0, sep);
+            String subject = item.substring(0, sep);
             String html    = item.substring(sep + 1);
             if (!smtpSendMail(subject, html)) {
                 // Диагностика уже записана внутри smtpSendMail
             }
+        } else {
+            DbgWarn("EM: malformed queue item (sep=%d)", sep);
         }
     }
 
@@ -771,7 +833,7 @@ void emailLoop() {
             s_lastReportDay  = ti.tm_mday;
             s_lastReportMon  = ti.tm_mon + 1;
             s_lastReportYear = ti.tm_year + 1900;
-            emailQueueReport("ru");
+            emailQueueReport(s_cfg.uiLang);
         }
     }
 }
