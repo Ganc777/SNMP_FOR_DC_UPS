@@ -1,19 +1,24 @@
 //==============================================================
 // SNMP_FOR_DC_UPS
-// Release : R09.6
+// Release : R10.5
 // File    : web.cpp
 //==============================================================
-// R09.0–R09.5: см. паспорт проекта.
-// R09.6: вкладка «Системные настройки»:
-//        - удалён выпадающий список «Использовать NTP»
-//        - добавлены два выпадающих списка «Час / Минуты»
-//          для времени начала окна синхронизации NTP
-//        - подсказка под полями про окно 1 час
-//        API: поле ntpUse больше не читается/не отдаётся,
-//        вместо него ntpSyncHour и ntpSyncMin.
+// Веб-сервер: дашборд, настройки, калибровка, логи, OTA.
 //
-// 
-// 
+// История:
+//   R05.x: базовый веб-дашборд, настройки, калибровка.
+//   R06.x: двуязычный интерфейс RU/EN, флаги SVG.
+//   R07.x: вкладки Telegram/Email, тесты.
+//   R08.x: навигация по графику ◄ ►, индикатор загрузки.
+//   R09.x: uiLang/uiEventMask в NVS, beforeunload, NTP.
+//   R10.x: подсветка событий, цвета OK/FAIL, стек иконок по X.
+//   R10.5: - parseLogLines() под компактный формат [LOG]:
+//            8.38V/99%|12.14V/OK|3809s|57.8C
+//          - поддержка timestamp "up HH:MM:SS" без NTP.
+//          - recalcFill(): LOG_LINE_BYTES=60, поправка 0.9.
+//          - значение "~X d Y h" выделено белым (<b>).
+//          - handleApiUiConfig(): применять uiLang в TG/EM
+//            без перезагрузки (telegramSetConfig + emailSetConfig).
 //==============================================================
 
 #include "web.h"
@@ -193,6 +198,7 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLDOC(
   .logcfg .info2{color:#8cf;font-size:12px;line-height:1.7;margin-bottom:14px;}
   .logcfg .info2 b{color:#fff;}
   .logcfg .info2 .sep{color:#456;margin:0 8px;}
+  .logcfg .fillval{color:#fff;font-weight:600;}
   .tgcats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
     gap:10px;margin-top:10px;}
   .tgcats label{display:flex;align-items:center;gap:8px;cursor:pointer;
@@ -208,7 +214,6 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLDOC(
     display:none;white-space:nowrap;box-shadow:0 2px 10px rgba(0,0,0,0.6);}
   .evt-tip b{color:var(--accent);}
 
-  /* R09.6: строка с двумя селектами (час:минуты) + подсказка */
   .ntp-time{display:grid;grid-template-columns:90px 90px;gap:6px;
     align-items:center;}
   .ntp-hint{color:#8cf;font-size:11px;margin-top:4px;line-height:1.4;}
@@ -331,7 +336,6 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLDOC(
           <option value="AEST-10AEDT,M10.1.0,M4.1.0/3" data-tz="tzSYD">Сидней (UTC+10/+11, DST)</option>
         </select>
       </div>
-      <!-- R09.6: вместо "Использовать NTP" — время начала окна -->
       <div class="field">
         <div class="label" data-i18n="lblNtpSyncTime">Начало окна синхронизации NTP</div>
         <div class="ntp-time">
@@ -339,7 +343,7 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLDOC(
           <select id="c_ntpSyncMin"></select>
         </div>
         <div class="ntp-hint" data-i18n="ntpSyncHint">
-          Окно синхронизации — 1 час. NTP всегда включён.
+          Окно синхронизации — 1 час. До 3 попыток с интервалом 30 мин.
         </div>
       </div>
       <div class="field"><div class="label" data-i18n="lblTempHighC">Порог температуры, °C</div>
@@ -700,7 +704,7 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLDOC(
       <div class="label">
         <span data-i18n="logPeriod">Период записи</span>
         (<span data-i18n="fillIn">свежий заполнится за</span>
-        ~<span id="lc_fill1">—</span>)
+        ~<b class="fillval"><span id="lc_fill1">—</span></b>)
       </div>
       <div style="max-width:260px">
         <select id="lc_period" onchange="recalcFill()">
@@ -822,7 +826,7 @@ const i18n = {
     lblNtpSrv2: "NTP-сервер 2",
     lblTimezone: "Часовой пояс",
     lblNtpSyncTime: "Начало окна синхронизации NTP",
-    ntpSyncHint: "Окно синхронизации — 1 час. NTP всегда включён.",
+    ntpSyncHint: "Окно синхронизации — 1 час. До 3 попыток с интервалом 30 мин.",
     lblTempHighC: "Порог температуры, °C",
     lblBattFullV: "Батарея полная, В",
     lblBattWarnV: "Предупреждение, В",
@@ -1074,7 +1078,7 @@ const i18n = {
     lblNtpSrv2: "NTP server 2",
     lblTimezone: "Timezone",
     lblNtpSyncTime: "NTP sync window start",
-    ntpSyncHint: "Sync window is 1 hour. NTP is always enabled.",
+    ntpSyncHint: "Sync window is 1 hour. Up to 3 attempts with 30 min interval.",
     lblTempHighC: "Temperature threshold, °C",
     lblBattFullV: "Battery full, V",
     lblBattWarnV: "Warning threshold, V",
@@ -1301,7 +1305,6 @@ function stateLabel(name) {
   return tr('state' + name);
 }
 
-// === R09.6: СЕКЦИЯ 2 ===
 //=================================================================
 // ФУНКЦИИ ОТОБРАЖЕНИЯ СТАТУСОВ
 //=================================================================
@@ -1349,7 +1352,7 @@ function updateEmStatus() {
 }
 
 //=================================================================
-// R09.6: селекты часа/минуты для начала окна NTP
+// R10.5: селекты часа/минуты для начала окна NTP
 //=================================================================
 function initNtpTimeSelects() {
   const hSel = document.getElementById('c_ntpSyncHour');
@@ -1379,7 +1382,6 @@ function setNtpTimeValues(hour, min) {
   const mSel = document.getElementById('c_ntpSyncMin');
   if (!hSel || !mSel) return;
 
-  // Округление минут до шага 5
   let m = parseInt(min);
   if (isNaN(m)) m = 30;
   m = Math.round(m / 5) * 5;
@@ -1396,7 +1398,7 @@ function setNtpTimeValues(hour, min) {
 }
 
 //=================================================================
-// Применение языка + перевод часовых поясов
+// Применение языка
 //=================================================================
 function applyLang(lang) {
   curLang = lang;
@@ -1642,11 +1644,11 @@ function drawPowerSymbol(ctx, x, y, s, color) {
 
   const r = s * 0.42;
 
-  const startA = -Math.PI * 145 / 180;   // -145°
-  const endA   = -Math.PI * 35 / 180;    // -35°
+  const startA = -Math.PI * 145 / 180;
+  const endA   = -Math.PI * 35 / 180;
 
   ctx.beginPath();
-  ctx.arc(x, y, r, startA, endA, true);  // anticlockwise = true
+  ctx.arc(x, y, r, startA, endA, true);
   ctx.stroke();
 
   ctx.beginPath();
@@ -1732,21 +1734,32 @@ function parseEvents(text) {
     { re: /\[EVT\]\s+STATE\s+->\s+NORMAL/,     type: 'INPUT_REST', cat: 'power' },
     { re: /\[EVT\]\s+STATE\s+->\s+LOW_BATT/,   type: 'BATT_LOW',   cat: 'batt'  },
     { re: /\[EVT\]\s+STATE\s+->\s+CRITICAL/,   type: 'BATT_CRIT',  cat: 'batt'  },
+    { re: /\[EVT\]\s+SNMP:/,                   type: 'SNMP',       cat: 'snmp'  },
     { re: /\[EVT\]\s+SNMP event sent:/,        type: 'SNMP',       cat: 'snmp'  },
     { re: /\[EVT\]\s+WoL sent to/,             type: 'WOL',        cat: 'wol'   },
-    { re: /\[EVT\]\s+NTP:\s+time synced/,      type: 'NTP_OK',     cat: 'ntp'   },
-    { re: /\[EVT\]\s+NTP:\s+sync FAILED/,      type: 'NTP_FAIL',   cat: 'ntp'   },
+    { re: /\[EVT\]\s+NTP synced/,              type: 'NTP_OK',     cat: 'ntp'   },
+    { re: /\[EVT\]\s+NTP: time synced/,        type: 'NTP_OK',     cat: 'ntp'   },
+    { re: /\[EVT\]\s+NTP FAILED/,              type: 'NTP_FAIL',   cat: 'ntp'   },
+    { re: /\[EVT\]\s+NTP: sync FAILED/,        type: 'NTP_FAIL',   cat: 'ntp'   },
+    { re: /\[EVT\]\s+boot/,                    type: 'BOOT',       cat: 'boot'  },
     { re: /\[EVT\]\s+Device boot/,             type: 'BOOT',       cat: 'boot'  },
     { re: /\[EVT\]\s+WiFi connected/,          type: 'WIFI_OK',    cat: 'wifi'  },
     { re: /\[EVT\]\s+WiFi lost/,               type: 'WIFI_LOST',  cat: 'wifi'  },
     { re: /\[EVT\]\s+TEMP_HIGH/,               type: 'TEMP_HIGH',  cat: 'temp'  },
-    { re: /\[EVT\]\s+TG:\s+mail sent OK/,      type: 'TG_OK',      cat: 'notify' },
-    { re: /\[EVT\]\s+TG:\s+send FAILED/,       type: 'TG_FAIL',    cat: 'notify' },
-    { re: /\[EVT\]\s+EM:\s+mail sent OK/,      type: 'EM_OK',      cat: 'notify' },
-    { re: /\[EVT\]\s+EM:\s+send FAILED/,       type: 'EM_FAIL',    cat: 'notify' }
+    { re: /\[EVT\]\s+TG:OK/,                   type: 'TG_OK',      cat: 'notify' },
+    { re: /\[EVT\]\s+TG: message sent OK/,     type: 'TG_OK',      cat: 'notify' },
+    { re: /\[EVT\]\s+TG:FAIL/,                 type: 'TG_FAIL',    cat: 'notify' },
+    { re: /\[EVT\]\s+TG: send FAILED/,         type: 'TG_FAIL',    cat: 'notify' },
+    { re: /\[EVT\]\s+EM:OK/,                   type: 'EM_OK',      cat: 'notify' },
+    { re: /\[EVT\]\s+EM: mail sent OK/,        type: 'EM_OK',      cat: 'notify' },
+    { re: /\[EVT\]\s+EM:FAIL/,                 type: 'EM_FAIL',    cat: 'notify' },
+    { re: /\[EVT\]\s+EM: send FAILED/,         type: 'EM_FAIL',    cat: 'notify' }
   ];
 
-  const reLog = /\[LOG\]\s+BATT\s+([\d.]+)V/;
+  // R10.5: компактный [LOG] формата:
+  //   2026-10-12 17:03:43 [LOG] 8.38V/99%|12.14V/OK|3809s|57.8C
+  // Группа 1: BATT voltage
+  const reLog = /\[LOG\]\s+([\d.]+)V\//;
   for (const line of lines) {
     const mLog = line.match(reLog);
     if (mLog) lastBatt = parseFloat(mLog[1]);
@@ -2024,6 +2037,12 @@ async function refresh() {
 refresh();
 setInterval(refresh, 2000);
 
+//=================================================================
+// R10.5: пересчёт времени заполнения "свежего" файла.
+// Средняя длина строки [LOG] в компактном формате:
+//   2026-10-12 17:03:43 [LOG] 8.38V/99%|12.14V/OK|3809s|57.8C\n = 60 байт
+// Поправка 0.9 — на редкие [EVT]-строки (само событие + TG:OK/EM:OK).
+//=================================================================
 function recalcFill() {
   const sel = document.getElementById('lc_period');
   if (!sel) return;
@@ -2037,10 +2056,10 @@ function recalcFill() {
     return;
   }
 
-  const lineBytes = 130;
-  const capacity = Math.floor(lastMaxBytes / lineBytes);
+  const LOG_LINE_BYTES = 60;
+  const capacity = Math.floor(lastMaxBytes / LOG_LINE_BYTES);
   const baseSec = capacity * period;
-  const evtSec = baseSec * 0.8;
+  const evtSec = Math.floor(baseSec * 0.9);
   el.textContent = fmtDuration(evtSec);
 }
 
@@ -2164,23 +2183,54 @@ function showMsg(text, ok) {
 
 //=================================================================
 // ПАРСИНГ ЛОГА
+// R10.5: компактный формат:
+//   - "2026-10-12 17:03:43 [LOG] 8.38V/99%|12.14V/OK|3809s|57.8C"
+//   - "up 02:57:03 [LOG] 8.38V/99%|12.14V/OK|3809s|57.8C" (без NTP)
 //=================================================================
 function parseLogLines(text) {
   const lines = text.split(/\r?\n/);
   const points = [];
-  const re = /^(.+?)\s+up\s+(?:(\d+)d\s+)?(\d{2}:\d{2}:\d{2})\s+\[LOG\]\s+BATT\s+([\d.]+)V\s+\((\d+)%\)\s+\|\s+INPUT\s+([\d.]+)V\s+\(([^)]+)\)\s+\|\s+runtime\s+(\d+)\s+s\s+\|\s+TEMP\s+([\-\d.]+)/;
+
+  // Группа 1: timestamp (либо "YYYY-MM-DD HH:MM:SS", либо "up HH:MM:SS")
+  // Группа 2: BATT voltage
+  // Группа 3: BATT percent
+  // Группа 4: INPUT voltage
+  // Группа 5: INPUT state (OK|LOST)
+  // Группа 6: runtime (sec)
+  // Группа 7: temperature
+  const re = /^(.+?)\s+\[LOG\]\s+([\d.]+)V\/(\d+)%\|([\d.]+)V\/(\w+)\|(\d+)s\|([\d.\-]+)C/;
+
+  const nowMs = Date.now();
+
   for (const line of lines) {
     const m = line.match(re);
     if (!m) continue;
-    const ts = m[1];
-    const batt = parseFloat(m[4]);
-    const pct = parseInt(m[5]);
-    const inp = parseFloat(m[6]);
-    const rt = parseInt(m[8]);
-    const temp = parseFloat(m[9]);
-    const d = new Date(ts.replace(' ', 'T'));
-    if (isNaN(d.getTime())) continue;
-    points.push({t: d.getTime(), batt, pct, inp, rt, temp});
+
+    const ts = m[1].trim();
+    const batt  = parseFloat(m[2]);
+    const pct   = parseInt(m[3]);
+    const inp   = parseFloat(m[4]);
+    const rt    = parseInt(m[6]);
+    const temp  = parseFloat(m[7]);
+
+    let tMs;
+    if (ts.startsWith('up ')) {
+      // "up HH:MM:SS" — относительно boot. Приблизительно:
+      // считаем от текущего времени минус uptime.
+      const parts = ts.substring(3).split(':');
+      if (parts.length !== 3) continue;
+      const upSec = parseInt(parts[0])*3600 + parseInt(parts[1])*60 + parseInt(parts[2]);
+      // Приблизительная оценка — относительно "сейчас".
+      // Более точно восстановить нельзя без сохранённого boot-time.
+      tMs = nowMs - upSec * 1000;
+    } else {
+      // "YYYY-MM-DD HH:MM:SS"
+      const d = new Date(ts.replace(' ', 'T'));
+      if (isNaN(d.getTime())) continue;
+      tMs = d.getTime();
+    }
+
+    points.push({t: tMs, batt, pct, inp, rt, temp});
   }
   points.sort((a, b) => a.t - b.t);
   return points;
@@ -2374,7 +2424,6 @@ function collectAllFields() {
     });
   });
 
-  // R09.6: время начала окна NTP
   const hSel = document.getElementById('c_ntpSyncHour');
   const mSel = document.getElementById('c_ntpSyncMin');
   if (hSel) body.ntpSyncHour = parseInt(hSel.value);
@@ -2462,7 +2511,6 @@ async function loadConfig() {
   if (ipEl  && c.qnapIp)  ipEl.value  = c.qnapIp;
   if (macEl && c.qnapMac) macEl.value = c.qnapMac;
 
-  // R09.6: время начала окна NTP
   if (c.ntpSyncHour !== undefined && c.ntpSyncMin !== undefined) {
     setNtpTimeValues(c.ntpSyncHour, c.ntpSyncMin);
   }
@@ -2675,7 +2723,6 @@ async function clearLog() {
 </body>
 </html>
 )HTMLDOC";
-
 //=================================================================
 // HTTP-ОБРАБОТЧИКИ
 //=================================================================
@@ -2760,7 +2807,6 @@ static void handleApiConfigGet() {
     j += "\"mask\":\""   + s_cfg.mask + "\",";
     j += "\"gw\":\""     + s_cfg.gw + "\",";
     j += "\"dns\":\""    + s_cfg.dns + "\",";
-    // R09.6: ntpUse больше не отдаётся.
     j += "\"ntpServer1\":\"" + s_cfg.ntpServer1 + "\",";
     j += "\"ntpServer2\":\"" + s_cfg.ntpServer2 + "\",";
     j += "\"ntpTz\":\""      + s_cfg.ntpTz + "\",";
@@ -2863,7 +2909,6 @@ static void handleApiConfigPost() {
     if (jsonGetString(body, "gw", s))             s_cfg.gw = s;
     if (jsonGetString(body, "dns", s))            s_cfg.dns = s;
 
-    // R09.6: NTP всегда включён, поле ntpUse игнорируем.
     if (jsonGetString(body, "ntpServer1", s))     s_cfg.ntpServer1 = s;
     if (jsonGetString(body, "ntpServer2", s))     s_cfg.ntpServer2 = s;
     if (jsonGetString(body, "ntpTz", s))          s_cfg.ntpTz = s;
@@ -2924,10 +2969,11 @@ static void handleApiConfigPost() {
     storageSave(s_cfg);
     telegramSetConfig(s_cfg);
     emailSetConfig(s_cfg);
-    ntpSetConfig(s_cfg);   // R09.6: применить новые NTP-серверы и время окна
+    ntpSetConfig(s_cfg);
     s_server.send(200, "application/json", "{\"ok\":true}");
 }
 
+// R10.5: применяем язык в TG/EM без перезагрузки.
 static void handleApiUiConfig() {
     if (!s_server.hasArg("plain")) { s_server.send(400, "no body"); return; }
     String body = s_server.arg("plain");
@@ -2937,6 +2983,8 @@ static void handleApiUiConfig() {
     if (jsonGetInt   (body, "uiEventMask", i)) s_cfg.uiEventMask = (uint16_t)i;
 
     storageSave(s_cfg);
+    telegramSetConfig(s_cfg);
+    emailSetConfig(s_cfg);
     s_server.send(200, "application/json", "{\"ok\":true}");
 }
 
@@ -2968,7 +3016,6 @@ static void handleApiConfigResetPane() {
         s_cfg.wifiSsid = def.wifiSsid; s_cfg.wifiPass = def.wifiPass;
         s_cfg.hostname = def.hostname; s_cfg.useDhcp = def.useDhcp;
         s_cfg.ip = def.ip; s_cfg.mask = def.mask; s_cfg.gw = def.gw; s_cfg.dns = def.dns;
-        // R09.6: NTP всегда включён, время окна тоже сбрасываем
         s_cfg.ntpServer1 = def.ntpServer1;
         s_cfg.ntpServer2 = def.ntpServer2;
         s_cfg.ntpTz = def.ntpTz;
@@ -3011,7 +3058,7 @@ static void handleApiConfigResetPane() {
     storageSave(s_cfg);
     telegramSetConfig(s_cfg);
     emailSetConfig(s_cfg);
-    ntpSetConfig(s_cfg);   // R09.6
+    ntpSetConfig(s_cfg);
     DbgInfo("Web: config reset pane '%s'", pane.c_str());
     loggerEvent("Config reset pane '%s' via web", pane.c_str());
     s_server.send(200, "application/json", "{\"ok\":true}");
