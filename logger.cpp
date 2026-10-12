@@ -1,25 +1,31 @@
 //==============================================================
 // SNMP_FOR_DC_UPS
-// Release : R10
+// Release : R10.2
 // File    : logger.cpp
 //==============================================================
-// R05.2: убрано опасное пересоздание файла из writeLine().
-// R06.0: loggerEvent()/loggerEventCat() дублируют событие
-//        в Telegram и Email по категории.
-// R07.6.3: двухфайловая ротация log.txt + log.old.
-// R07.7: удалены loggerReadAll() и пр. неиспользуемые функции.
-// R08.2: режим "только события" (g_logEventsOnly).
-// R08.4: снимок [LOG] после [EVT] пишется при ЛЮБОМ периоде,
-//        но не чаще, чем раз в 60 сек с момента последней
-//        записи [LOG].
-// R09.1: добавлена loggerEventNoNotify() — пишет [EVT] в лог,
-//        но НЕ ставит в очередь TG/EM. Нужна для внутреннего
-//        логирования из telegram.cpp/email.cpp, чтобы разорвать
-//        бесконечную рекурсию.
-// R10:   detectEvCategory() вынесена в публичный API и
-//        дополнена detectEvtResult() — автоопределение
-//        результата (удача/неудача/факт) для красивого
-//        оформления уведомлений.
+// Логирование + локализация RU/EN + определение характеристик
+// событий по тексту.
+//
+// История:
+//   R05.2: убрано опасное пересоздание файла из writeLine().
+//   R06.0: loggerEvent()/loggerEventCat() дублируют событие
+//          в Telegram и Email по категории.
+//   R07.6.3: двухфайловая ротация log.txt + log.old.
+//   R07.7: удалены loggerReadAll() и пр. неиспользуемые функции.
+//   R08.2: режим "только события" (g_logEventsOnly).
+//   R08.4: снимок [LOG] после [EVT] пишется при ЛЮБОМ периоде,
+//          но не чаще, чем раз в 60 сек с момента последней
+//          записи [LOG].
+//   R09.1: loggerEventNoNotify() — пишет [EVT] в лог, но НЕ
+//          ставит в очередь TG/EM, чтобы разорвать рекурсию.
+//   R10:   detectEvCategory() вынесена в публичный API;
+//          добавлена detectEvtResult().
+//   R10.2: - detectEvtTitle() — заголовок с действием и локализацией.
+//          - i18n() — таблица локализации RU/EN.
+//          - Компактный [LOG]: 7.76V/72%|12.21V/OK|2770s|53.3C.
+//          - Timestamp без NTP — "up HH:MM:SS".
+//          - TG:OK / TG:FAIL / EM:OK / EM:FAIL.
+//          - NTP-лог: "NTP synced (sched, 1/3)" / "NTP FAILED (sched, 3/3)".
 //==============================================================
 
 #include "logger.h"
@@ -42,6 +48,160 @@ bool g_logEventsOnly = false;
 
 static const uint32_t SNAPSHOT_MIN_MS = 60000UL;
 
+//==============================================================
+// ЛОКАЛИЗАЦИЯ RU/EN
+//==============================================================
+
+struct I18nEntry {
+    const char *key;
+    const char *ru;
+    const char *en;
+};
+
+static const I18nEntry I18N_TABLE[] = {
+    { "battery",         "Батарея",              "Battery" },
+    { "input",           "Вход",                 "Input" },
+    { "runtime",         "Runtime",              "Runtime" },
+    { "cpu_temp",        "Температура CPU",      "CPU temp" },
+    { "state",           "Состояние",            "State" },
+    { "ntp",             "NTP",                  "NTP" },
+    { "uptime",          "Uptime",               "Uptime" },
+    { "ip",              "IP",                   "IP" },
+    { "power_losses",    "Пропаданий питания",   "Power losses" },
+    { "ntp_synced",      "синхронизировано",     "synced" },
+    { "ntp_not_synced",  "не синхронизировано",  "not synced" },
+    { "unit_v",          "В",                    "V" },
+    { "unit_min",        "мин",                  "min" },
+    { "unit_sec",        "с",                    "s" },
+    { "unit_c",          "°C",                   "°C" },
+    { "test_link",       "Тест связи",           "Test message" },
+    { "periodic_report", "Периодический отчёт",  "Periodic report" },
+    { "unknown",         "Неизвестно",           "Unknown" },
+    { "device_online",   "Устройство",           "Device" },
+    { "device_online2",  "на связи",             "online" },
+    { "release_label",   "Release",              "Release" },
+};
+
+static const size_t I18N_TABLE_N =
+    sizeof(I18N_TABLE) / sizeof(I18N_TABLE[0]);
+
+String i18n(const char *key, const String &lang) {
+    if (!key) return String();
+    for (size_t i = 0; i < I18N_TABLE_N; i++) {
+        if (strcmp(I18N_TABLE[i].key, key) == 0) {
+            return String((lang == "en") ? I18N_TABLE[i].en
+                                         : I18N_TABLE[i].ru);
+        }
+    }
+    return String(key);
+}
+
+//==============================================================
+// ЗАГОЛОВКИ СОБЫТИЙ (с действием)
+//==============================================================
+
+struct EvtTitleEntry {
+    const char *pattern;
+    const char *ru;
+    const char *en;
+};
+
+static const EvtTitleEntry EVT_TITLES[] = {
+    { "STATE -> INPUT_LOST",  "Питание пропало",              "Power lost" },
+    { "INPUT LOST",           "Питание пропало",              "Power lost" },
+    { "INPUT RESTORED",       "Питание восстановлено",        "Power restored" },
+    { "STATE -> NORMAL",      "Питание восстановлено",        "Power restored" },
+    { "STATE -> LOW_BATT",    "Батарея разряжена",            "Battery low" },
+    { "LOW_BATT",             "Батарея разряжена",            "Battery low" },
+    { "STATE -> CRITICAL",    "Батарея критически разряжена", "Battery critical" },
+    { "CRITICAL",             "Батарея критически разряжена", "Battery critical" },
+    { "BATT_RECOVERED",       "Батарея восстановлена",        "Battery recovered" },
+    { "WoL sent",             "WoL отправлен",                "WoL sent" },
+    { "Device boot",          "Перезагрузка",                 "Reboot" },
+    { "WiFi connected",       "Wi-Fi подключён",              "Wi-Fi connected" },
+    { "WiFi lost",            "Wi-Fi потерян",                "Wi-Fi lost" },
+    { "SNMP event sent",      "SNMP-уведомление",             "SNMP notification" },
+    { "NTP: time synced",     "NTP синхронизировано",         "NTP synced" },
+    { "NTP synced",           "NTP синхронизировано",         "NTP synced" },
+    { "NTP: sync FAILED",     "NTP не синхронизировано",      "NTP sync failed" },
+    { "NTP FAILED",           "NTP не синхронизировано",      "NTP sync failed" },
+    { "TEMP_HIGH",            "Перегрев CPU",                 "CPU overheat" },
+    { "TEMP_OK",              "Температура в норме",          "Temperature normal" },
+    { "TG: message sent OK",  "Telegram отправлено",          "Telegram sent" },
+    { "TG:OK",                "Telegram отправлено",          "Telegram sent" },
+    { "TG: send FAILED",      "Telegram не отправлено",       "Telegram failed" },
+    { "TG:FAIL",              "Telegram не отправлено",       "Telegram failed" },
+    { "EM: mail sent OK",     "Email отправлено",             "Email sent" },
+    { "EM:OK",                "Email отправлено",             "Email sent" },
+    { "EM: send FAILED",      "Email не отправлено",          "Email failed" },
+    { "EM:FAIL",              "Email не отправлено",          "Email failed" },
+};
+
+static const size_t EVT_TITLES_N =
+    sizeof(EVT_TITLES) / sizeof(EVT_TITLES[0]);
+
+String detectEvtTitle(const char *msg, const String &lang) {
+    if (!msg) return String();
+    for (size_t i = 0; i < EVT_TITLES_N; i++) {
+        if (strstr(msg, EVT_TITLES[i].pattern)) {
+            return String((lang == "en") ? EVT_TITLES[i].en
+                                         : EVT_TITLES[i].ru);
+        }
+    }
+    return String();
+}
+
+uint16_t detectEvCategory(const char *msg) {
+    if (!msg) return 0;
+
+    if (strstr(msg, "STATE ->"))        return TG_EV_POWER;
+    if (strstr(msg, "INPUT LOST"))      return TG_EV_POWER;
+    if (strstr(msg, "INPUT RESTORED"))  return TG_EV_POWER;
+    if (strstr(msg, "LOW_BATT"))        return TG_EV_BATT;
+    if (strstr(msg, "CRITICAL"))        return TG_EV_BATT;
+    if (strstr(msg, "BATT"))            return TG_EV_BATT;
+    if (strstr(msg, "WoL"))             return TG_EV_WOL;
+    if (strstr(msg, "boot"))            return TG_EV_BOOT;
+    if (strstr(msg, "Device boot"))     return TG_EV_BOOT;
+    if (strstr(msg, "WiFi"))            return TG_EV_WIFI;
+    if (strstr(msg, "SNMP"))            return TG_EV_SNMP;
+    if (strstr(msg, "NTP"))             return TG_EV_NTP;
+    if (strstr(msg, "TEMP"))            return TG_EV_TEMP;
+    if (strstr(msg, "TG:"))             return TG_EV_SNMP;
+    if (strstr(msg, "EM:"))             return EM_EV_SNMP;
+    return 0;
+}
+
+EvtResult detectEvtResult(const char *msg) {
+    if (!msg) return EVT_RES_FACT;
+
+    if (strstr(msg, "FAILED")     ||
+        strstr(msg, "FAIL")       ||
+        strstr(msg, "rejected")   ||
+        strstr(msg, "timeout")    ||
+        strstr(msg, "Timeout")    ||
+        strstr(msg, "CRITICAL")   ||
+        strstr(msg, "LOW_BATT")   ||
+        strstr(msg, "INPUT_LOST") ||
+        strstr(msg, "LOST")       ||
+        strstr(msg, "lost")       ||
+        strstr(msg, "error")      ||
+        strstr(msg, "Error")) {
+        return EVT_RES_FAIL;
+    }
+
+    if (strstr(msg, "OK")          ||
+        strstr(msg, "synced")      ||
+        strstr(msg, "connected")   ||
+        strstr(msg, "RESTORED")    ||
+        strstr(msg, "RECOVERED")   ||
+        strstr(msg, "NORMAL")) {
+        return EVT_RES_OK;
+    }
+
+    return EVT_RES_FACT;
+}
+
 //--------------------------------------------------------------
 // Пересчёт максимального размера буфера от LittleFS
 //--------------------------------------------------------------
@@ -62,6 +222,16 @@ static void recalcMaxBytes() {
 }
 
 static bool rotateLogs();
+
+//--------------------------------------------------------------
+// Компактная метка времени.
+//--------------------------------------------------------------
+String loggerTimestamp() {
+    if (ntpIsSynced()) {
+        return ntpDateTimeStr();
+    }
+    return "up " + sysFormatDHMS(sysUptimeSec());
+}
 
 //--------------------------------------------------------------
 // Инициализация
@@ -126,17 +296,6 @@ void loggerInit() {
 }
 
 //--------------------------------------------------------------
-// Метка времени
-//--------------------------------------------------------------
-String loggerTimestamp() {
-    String upStr = "up " + sysFormatDHMS(sysUptimeSec());
-    if (ntpIsSynced()) {
-        return ntpDateTimeStr() + " " + upStr;
-    }
-    return upStr;
-}
-
-//--------------------------------------------------------------
 // Двухфайловая ротация.
 //--------------------------------------------------------------
 static bool rotateLogs() {
@@ -190,15 +349,17 @@ static void writeLine(const String &line) {
 }
 
 //--------------------------------------------------------------
-// R08.2 / R08.4: снимок текущего состояния [LOG].
+// Снимок [LOG] — компактный формат.
 //--------------------------------------------------------------
 static void writeCurrentSnapshot() {
     UpsStatus st = upsGetStatus();
-    char buf[224];
+    char buf[128];
     snprintf(buf, sizeof(buf),
-             "BATT %.3fV (%u%%) | INPUT %.3fV (%s) | runtime %lu s | TEMP %.1f C",
-             st.batteryVolts, st.batteryPercent,
-             st.inputVolts, st.inputPresent ? "OK" : "LOST",
+             "%.2fV/%u%%|%.2fV/%s|%lus|%.1fC",
+             st.batteryVolts,
+             st.batteryPercent,
+             st.inputVolts,
+             st.inputPresent ? "OK" : "LOST",
              (unsigned long)st.runtimeSec,
              g_lastTempC);
     String line = loggerTimestamp() + " [LOG] " + buf;
@@ -230,79 +391,7 @@ void loggerLog(LogLevel level, const char *fmt, ...) {
 }
 
 //--------------------------------------------------------------
-// Определение категории уведомления (R10: публичная).
-//--------------------------------------------------------------
-uint16_t detectEvCategory(const char *msg) {
-    if (!msg) return 0;
-
-    if (strstr(msg, "STATE ->"))        return TG_EV_POWER;
-    if (strstr(msg, "INPUT LOST"))      return TG_EV_POWER;
-    if (strstr(msg, "INPUT RESTORED"))  return TG_EV_POWER;
-
-    if (strstr(msg, "LOW_BATT"))        return TG_EV_BATT;
-    if (strstr(msg, "CRITICAL"))        return TG_EV_BATT;
-    if (strstr(msg, "BATT"))            return TG_EV_BATT;
-
-    if (strstr(msg, "WoL"))             return TG_EV_WOL;
-
-    if (strstr(msg, "boot"))            return TG_EV_BOOT;
-    if (strstr(msg, "Device boot"))     return TG_EV_BOOT;
-
-    if (strstr(msg, "WiFi"))            return TG_EV_WIFI;
-    if (strstr(msg, "SNMP"))            return TG_EV_SNMP;
-    if (strstr(msg, "NTP"))             return TG_EV_NTP;
-    if (strstr(msg, "TEMP"))            return TG_EV_TEMP;
-
-    // R10: категории уведомлений TG/EM
-    if (strstr(msg, "TG:"))             return TG_EV_SNMP;  // переиспользуем
-    if (strstr(msg, "EM:"))             return EM_EV_SNMP;
-
-    return 0;
-}
-
-//--------------------------------------------------------------
-// R10: автоопределение результата события по тексту.
-//   EVT_RES_OK   — текст содержит признаки успеха
-//   EVT_RES_FAIL — текст содержит признаки ошибки
-//   EVT_RES_FACT — нейтральное событие
-//--------------------------------------------------------------
-EvtResult detectEvtResult(const char *msg) {
-    if (!msg) return EVT_RES_FACT;
-
-    // Сначала проверяем неудачи (приоритетнее)
-    if (strstr(msg, "FAILED")     ||
-        strstr(msg, "FAIL")       ||
-        strstr(msg, "rejected")   ||
-        strstr(msg, "timeout")    ||
-        strstr(msg, "Timeout")    ||
-        strstr(msg, "CRITICAL")   ||
-        strstr(msg, "LOW_BATT")   ||
-        strstr(msg, "INPUT_LOST") ||
-        strstr(msg, "LOST")       ||
-        strstr(msg, "lost")       ||
-        strstr(msg, "error")       ||
-        strstr(msg, "Error")) {
-        return EVT_RES_FAIL;
-    }
-
-    // Затем — удачи
-    if (strstr(msg, "OK")          ||
-        strstr(msg, "sent OK")     ||
-        strstr(msg, "synced")      ||
-        strstr(msg, "connected")   ||
-        strstr(msg, "RESTORED")    ||
-        strstr(msg, "RECOVERED")   ||
-        strstr(msg, "NORMAL")) {
-        return EVT_RES_OK;
-    }
-
-    // Всё остальное — факт (без ✅/❌)
-    return EVT_RES_FACT;
-}
-
-//--------------------------------------------------------------
 // Критическое событие
-// R08.4: снимок [LOG] — не чаще 1 раза в 60 сек.
 //--------------------------------------------------------------
 void loggerEvent(const char *fmt, ...) {
     if (!s_fsReady) return;
@@ -331,7 +420,6 @@ void loggerEvent(const char *fmt, ...) {
 
 //--------------------------------------------------------------
 // Событие с явно указанной категорией
-// R08.4: снимок [LOG] — не чаще 1 раза в 60 сек.
 //--------------------------------------------------------------
 void loggerEventCat(uint16_t tgBit, const char *fmt, ...) {
     if (!s_fsReady) return;
@@ -358,7 +446,7 @@ void loggerEventCat(uint16_t tgBit, const char *fmt, ...) {
 }
 
 //--------------------------------------------------------------
-// R09.1: событие БЕЗ дублирования в Telegram/Email.
+// Событие БЕЗ дублирования в Telegram/Email.
 //--------------------------------------------------------------
 void loggerEventNoNotify(const char *fmt, ...) {
     if (!s_fsReady) return;
@@ -380,7 +468,7 @@ void loggerEventNoNotify(const char *fmt, ...) {
 }
 
 //--------------------------------------------------------------
-// Редкий лог напряжений
+// Редкий лог напряжений (компактный формат).
 //--------------------------------------------------------------
 void loggerLoop(const Config &cfg,
                 float batteryVolts,
@@ -405,11 +493,13 @@ void loggerLoop(const Config &cfg,
     if (now - s_lastVoltLogMs >= periodMs) {
         s_lastVoltLogMs = now;
 
-        char buf[224];
+        char buf[128];
         snprintf(buf, sizeof(buf),
-                 "BATT %.3fV (%u%%) | INPUT %.3fV (%s) | runtime %lu s | TEMP %.1f C",
-                 batteryVolts, batteryPercent,
-                 inputVolts, inputPresent ? "OK" : "LOST",
+                 "%.2fV/%u%%|%.2fV/%s|%lus|%.1fC",
+                 batteryVolts,
+                 batteryPercent,
+                 inputVolts,
+                 inputPresent ? "OK" : "LOST",
                  (unsigned long)runtimeSec,
                  tempC);
         String line = loggerTimestamp() + " [LOG] " + buf;
