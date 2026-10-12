@@ -1,24 +1,29 @@
 //==============================================================
 // SNMP_FOR_DC_UPS
-// Release : R10.1
+// Release : R10.6
 // File    : telegram.cpp
 //==============================================================
-// Отправка уведомлений через Telegram Bot API.
+// Уведомления в Telegram. Единый формат — 10 строк под чертой.
 //
 // История:
-//   R06.1: добавлены telegramStatusCode() и telegramStatusQueue().
-//   R07.0: строка "Температура CPU" вместо "Температура платы".
-//   R07.7: удалены telegramSetLang() и s_lang — язык всегда "ru".
+//   R06.0: базовый модуль Telegram.
+//   R06.1: telegramStatusCode() / telegramStatusQueue().
+//   R07.0: строка "Температура CPU".
+//   R07.7: удалены telegramSetLang() и s_lang.
 //   R09.0: периодический отчёт привязан к 12:00.
-//   R09.1: логирование факта отправки — через loggerEventNoNotify()
-//          вместо loggerEventCat(). Иначе была бесконечная рекурсия.
-//   R10:   красивое оформление уведомлений:
-//          - эмодзи категории события (⚡ 🔋 ⏻ 🔄 📶 🚀 🕐 🌡️)
-//          - ✅ / ❌ в зависимости от результата (автоопределение)
-//          - тонкий разделитель ─────
-//          - блок статуса ИБП внизу каждого события
-//          - "TG: message sent OK" вместо "TG: mail sent OK"
-//   R10.1: убраны буквы за ракетой — "🚀S" → "🚀".
+//   R09.1: логирование через loggerEventNoNotify().
+//   R10:   эмодзи категории, ✅/❌, разделитель, блок статуса.
+//   R10.2: единый формат с Email, локализация, подсветка.
+//   R10.3: диагностика маски в лог, q=%u.
+//   R10.5: фикс uptime-бага (boot после 12:00).
+//   R10.6: ЕДИНЫЙ формат для всех уведомлений — 10 строк:
+//          Батарея, Вход, Runtime, Температура, Состояние,
+//          NTP, Пропадания, Uptime, IP, Release.
+//          Заголовок с эмодзи категории + ✅/❌.
+//          - Периодический отчёт: 📊
+//          - Boot-отчёт: 🔄, безусловно, отложенно на 3 сек.
+//          - Тест: 🧪 ✅.
+//          Счётчик пропаданий сбрасывается в отчёте и boot.
 //==============================================================
 
 #include "telegram.h"
@@ -48,15 +53,19 @@ static uint8_t  s_qHead = 0;
 static uint8_t  s_qTail = 0;
 static uint8_t  s_qCount = 0;
 
-// R09.0: последняя дата отправки периодического отчёта
 static uint8_t  s_lastReportDay  = 0;
 static uint8_t  s_lastReportMon  = 0;
 static uint16_t s_lastReportYear = 0;
 
 static const uint8_t REPORT_HOUR = 12;
 
+// R10.6: одноразовый boot-отчёт
+static bool     s_bootReportDone = false;
+static uint32_t s_bootAtMs       = 0;
+static const uint32_t BOOT_REPORT_DELAY_MS = 3000UL;
+
 //--------------------------------------------------------------
-// Работа с очередью
+// Очередь
 //--------------------------------------------------------------
 static bool queuePush(const String &msg) {
     if (s_qCount >= TG_QUEUE_SIZE) {
@@ -84,6 +93,8 @@ static bool queuePop(String &out) {
 void telegramInit(const Config &cfg) {
     s_cfg = cfg;
     s_ready = false;
+    s_bootAtMs = millis();
+    s_bootReportDone = false;
 
     if (cfg.tgToken.length() == 0 || cfg.tgChatId.length() == 0) {
         DbgInfo("TG: token or chat_id empty, module disabled");
@@ -101,6 +112,19 @@ void telegramInit(const Config &cfg) {
     }
 
     s_ready = true;
+
+    if (ntpIsSynced()) {
+        time_t now = time(nullptr);
+        struct tm ti;
+        localtime_r(&now, &ti);
+        if (ti.tm_hour >= REPORT_HOUR) {
+            s_lastReportDay  = ti.tm_mday;
+            s_lastReportMon  = ti.tm_mon + 1;
+            s_lastReportYear = ti.tm_year + 1900;
+            DbgInfo("TG: boot after %u:00 — today marked as reported",
+                    (unsigned)REPORT_HOUR);
+        }
+    }
 
     DbgInfo("TG: ready, chat_id=%s, events=0x%04X, period=%u",
             cfg.tgChatId.c_str(),
@@ -157,8 +181,6 @@ String telegramStatusText() {
 
 //--------------------------------------------------------------
 // Отправка одной строки
-// R09.1: лог через loggerEventNoNotify — без рекурсии.
-// R10:   формулировка "TG: message sent OK".
 //--------------------------------------------------------------
 static bool sendMessage(const String &html) {
     if (!s_ready || s_bot == nullptr) return false;
@@ -167,17 +189,16 @@ static bool sendMessage(const String &html) {
 
     if (ok) {
         DbgInfo("TG: message sent");
-        loggerEventNoNotify("TG: message sent OK");
+        loggerEventNoNotify("TG:OK");
     } else {
         DbgWarn("TG: send FAILED");
-        loggerEventNoNotify("TG: send FAILED");
+        loggerEventNoNotify("TG:FAIL");
     }
     return ok;
 }
 
 //--------------------------------------------------------------
-// R10: подбор эмодзи категории по биту.
-// R10.1: убраны буквы за ракетой.
+// Эмодзи категории
 //--------------------------------------------------------------
 static const char* evtEmoji(uint16_t bit) {
     switch (bit) {
@@ -194,7 +215,7 @@ static const char* evtEmoji(uint16_t bit) {
 }
 
 //--------------------------------------------------------------
-// R10: суффикс результата — ✅ / ❌ / пусто.
+// Суффикс результата
 //--------------------------------------------------------------
 static const char* evtResultSuffix(EvtResult res) {
     switch (res) {
@@ -205,206 +226,195 @@ static const char* evtResultSuffix(EvtResult res) {
 }
 
 //--------------------------------------------------------------
-// R10: заголовок события — эмодзи + ✅/❌ + название.
+// Разметка [H]...[/H] → <b>...</b>
 //--------------------------------------------------------------
-static String formatHeader(uint16_t bit, EvtResult res,
-                           const String &title) {
-    String h;
-    h.reserve(64);
-    h += evtEmoji(bit);
-    h += evtResultSuffix(res);
-    h += " <b>";
-    h += title;
-    h += "</b>";
-    return h;
+static String applyHighlight(const String &in) {
+    String out;
+    out.reserve(in.length() + 16);
+    int pos = 0;
+    while (pos < (int)in.length()) {
+        int h1 = in.indexOf("[H]", pos);
+        if (h1 < 0) {
+            out += in.substring(pos);
+            break;
+        }
+        out += in.substring(pos, h1);
+        int h2 = in.indexOf("[/H]", h1);
+        if (h2 < 0) {
+            out += in.substring(h1);
+            break;
+        }
+        out += "<b>";
+        out += in.substring(h1 + 3, h2);
+        out += "</b>";
+        pos = h2 + 4;
+    }
+    return out;
 }
 
 //--------------------------------------------------------------
-// R10: тонкий разделитель.
+// Разделитель
 //--------------------------------------------------------------
 static String separator() {
     return String("\n─────────────────\n");
 }
 
 //--------------------------------------------------------------
-// R10: футер — блок статуса ИБП + дата/время.
+// Заголовок-фолбэк по категории
 //--------------------------------------------------------------
-static String formatFooter() {
-    String f;
-    f.reserve(400);
+static String categoryTitle(uint16_t bit, const String &lang) {
+    bool en = (lang == "en");
+    switch (bit) {
+        case TG_EV_POWER: return en ? "Power"       : "Питание";
+        case TG_EV_BATT:  return en ? "Battery"     : "Батарея";
+        case TG_EV_WOL:   return "WoL";
+        case TG_EV_BOOT:  return en ? "Reboot"      : "Перезагрузка";
+        case TG_EV_WIFI:  return "Wi-Fi";
+        case TG_EV_SNMP:  return "SNMP";
+        case TG_EV_NTP:   return "NTP";
+        case TG_EV_TEMP:  return en ? "Temperature" : "Температура";
+        default:          return en ? "Event"       : "Событие";
+    }
+}
 
-    f += "\n";
-    f += upsFormatStatusBlock(true);
-    f += "\n\n<i>";
+//--------------------------------------------------------------
+// R10.6: собрать сообщение — заголовок + разделитель + 10 строк + дата
+//--------------------------------------------------------------
+static String buildMessage(const String &headerHtml,
+                           const String &lang,
+                           uint16_t highlightCat) {
+    String body = upsBuildBody10(lang, true, highlightCat);
+    body = applyHighlight(body);
+
+    String m;
+    m.reserve(body.length() + 300);
+    m += headerHtml;
+    m += separator();
+    m += body;
+    m += "\n\n<i>";
     if (ntpIsSynced()) {
-        f += ntpDateTimeStr();
+        m += ntpDateTimeStr();
     } else {
-        f += "up " + sysFormatDHMS(sysUptimeSec());
+        m += "up " + sysFormatDHMS(sysUptimeSec());
     }
-    f += "</i>";
-    return f;
-}
-
-//--------------------------------------------------------------
-// R10: полное сообщение события.
-//--------------------------------------------------------------
-static String formatEventMessage(uint16_t bit, EvtResult res,
-                                 const String &title,
-                                 const String &body) {
-    String m;
-    m.reserve(600);
-
-    m += formatHeader(bit, res, title);
-    m += separator();
-    if (body.length() > 0) {
-        m += body;
-    }
-    m += formatFooter();
+    m += "</i>";
     return m;
 }
 
 //--------------------------------------------------------------
-// Общее формирование сообщения (для отчётов и теста).
+// Постановка события в очередь
 //--------------------------------------------------------------
-static String formatMessage(const String &title, const String &body) {
-    String m;
-    m.reserve(600);
-    m += title;
-    m += separator();
-    if (body.length() > 0) {
-        m += body;
-    }
-    m += formatFooter();
-    return m;
-}
-
 void telegramQueueEvent(uint16_t bit, const String &title, const String &body) {
     if (!s_ready) return;
     if (!s_cfg.tgEnable) return;
 
     if ((s_cfg.tgEvents & bit) == 0) {
-        DbgVerb("TG: event 0x%04X disabled in mask", bit);
+        loggerLog(LOGLEVEL_WARN, "TG: event 0x%04X disabled in mask", bit);
         return;
     }
 
     EvtResult res = detectEvtResult(body.c_str());
-    String msg = formatEventMessage(bit, res, title, body);
+
+    // Заголовок события
+    String evtTitle = detectEvtTitle(body.c_str(), s_cfg.uiLang);
+    if (evtTitle.length() == 0) {
+        evtTitle = categoryTitle(bit, s_cfg.uiLang);
+    }
+
+    String header;
+    header.reserve(96);
+    header += evtEmoji(bit);
+    header += evtResultSuffix(res);
+    header += " <b>DC UPS: ";
+    header += evtTitle;
+    header += "</b>";
+
+    String msg = buildMessage(header, s_cfg.uiLang, bit);
     queuePush(msg);
-    DbgInfo("TG: event queued (bit=0x%04X, res=%u)", bit, (unsigned)res);
-}
-
-void telegramNotify(uint16_t bit, const String &logLine) {
-    if (!s_ready) return;
-    if (!s_cfg.tgEnable) return;
-
-    String title;
-    switch (bit) {
-        case TG_EV_POWER: title = "DC UPS: Питание";      break;
-        case TG_EV_BATT:  title = "DC UPS: Батарея";      break;
-        case TG_EV_WOL:   title = "DC UPS: WoL";          break;
-        case TG_EV_BOOT:  title = "DC UPS: Перезагрузка"; break;
-        case TG_EV_WIFI:  title = "DC UPS: Wi-Fi";        break;
-        case TG_EV_SNMP:  title = "DC UPS: SNMP";         break;
-        case TG_EV_NTP:   title = "DC UPS: NTP";          break;
-        case TG_EV_TEMP:  title = "DC UPS: Температура";  break;
-        default:          title = "DC UPS";               break;
-    }
-
-    String body;
-    body.reserve(logLine.length() + 16);
-    for (size_t i = 0; i < logLine.length(); i++) {
-        char c = logLine[i];
-        if (c == '<')      body += "&lt;";
-        else if (c == '>') body += "&gt;";
-        else if (c == '&') body += "&amp;";
-        else               body += c;
-    }
-
-    telegramQueueEvent(bit, title, body);
+    DbgInfo("TG: event queued (bit=0x%04X, res=%u, q=%u)",
+            bit, (unsigned)res, (unsigned)s_qCount);
 }
 
 //--------------------------------------------------------------
-// R09.0 / R10: периодический отчёт.
+// Автоматическая постановка события
+//--------------------------------------------------------------
+void telegramNotify(uint16_t bit, const String &logLine) {
+    if (!s_ready) return;
+    if (!s_cfg.tgEnable) return;
+    telegramQueueEvent(bit, String(), logLine);
+}
+
+//--------------------------------------------------------------
+// R10.6: периодический отчёт — 📊, 10 строк.
+// Сброс счётчика пропаданий.
 //--------------------------------------------------------------
 void telegramQueueReport(const String &lang) {
     if (!s_ready) return;
     if (!s_cfg.tgEnable) return;
     if (s_cfg.tgPeriod == 0) return;
 
-    UpsStatus st = upsGetStatus();
+    String title = i18n("periodic_report", lang);
 
-    String title = "DC UPS: периодический отчёт";
+    String header;
+    header.reserve(96);
+    header += "📊 <b>DC UPS: ";
+    header += title;
+    header += "</b>";
 
-    String body;
-    body.reserve(400);
-    body += "🔋 Батарея: <b>" + String(st.batteryVolts, 3) + " В</b> ("
-            + String(st.batteryPercent) + "%)\n";
-    body += "⚡ Вход:    <b>" + String(st.inputVolts, 3) + " В</b> ("
-            + String(st.inputPresent ? "OK" : "LOST") + ")\n";
-    body += "⏱ Runtime: " + String((unsigned long)(st.runtimeSec / 60))
-            + " мин " + String((unsigned long)(st.runtimeSec % 60)) + " с\n";
-    body += "🌡️ Температура CPU: " + String(g_lastTempC, 1) + " °C\n";
-    body += "ℹ️ Состояние: " + String(upsStateName(st.state)) + "\n";
-    body += "🕐 Uptime:  " + sysUptimeStr() + "\n";
-    body += "🌐 IP: " + wifiGetIP();
-
-    String m;
-    m.reserve(700);
-    m += "📊 <b>";
-    m += title;
-    m += "</b>";
-    m += separator();
-    m += body;
-    m += "\n\n<i>";
-    if (ntpIsSynced()) {
-        m += ntpDateTimeStr();
-    } else {
-        m += "up " + sysFormatDHMS(sysUptimeSec());
-    }
-    m += "</i>";
-
-    queuePush(m);
+    String msg = buildMessage(header, lang, 0);
+    queuePush(msg);
     DbgInfo("TG: periodic report queued");
+
+    upsResetPowerLossCount();
 }
 
 //--------------------------------------------------------------
-// R10: тестовое сообщение с зелёной галочкой.
-// БЕЗ блока статуса ИБП — тест канала, не ИБП.
+// R10.6: boot-отчёт — 🔄, 10 строк.
+// Безусловно отправляется один раз после boot (см. telegramLoop).
+// Сброс счётчика пропаданий (поскольку это «старт с чистого»).
+//--------------------------------------------------------------
+void telegramQueueBootReport() {
+    if (!s_ready) return;
+    if (!s_cfg.tgEnable) return;
+
+    bool en = (s_cfg.uiLang == "en");
+    String title = en ? "Reboot" : "Перезагрузка";
+
+    String header;
+    header.reserve(96);
+    header += "🔄 <b>DC UPS: ";
+    header += title;
+    header += "</b>";
+
+    String msg = buildMessage(header, s_cfg.uiLang, 0);
+    queuePush(msg);
+    DbgInfo("TG: boot report queued");
+
+    upsResetPowerLossCount();
+}
+
+//--------------------------------------------------------------
+// R10.6: тест — 🧪 ✅, 10 строк.
 //--------------------------------------------------------------
 bool telegramSendTest() {
     if (!s_ready) return false;
     if (!s_bot) return false;
 
-    String title = "DC UPS: тест связи";
+    String lang = s_cfg.uiLang;
+    String title = i18n("test_link", lang);
 
-    String body;
-    body.reserve(220);
-    body += "Устройство <b>";
-    body += FW_DEVICE_NAME;
-    body += "</b> на связи.\n";
-    body += "Release: " FW_RELEASE "\n";
-    body += "🌐 IP: " + wifiGetIP();
+    String header;
+    header.reserve(96);
+    header += "🧪 ✅ <b>DC UPS: ";
+    header += title;
+    header += "</b>";
 
-    String m;
-    m.reserve(500);
-    m += "🧪 ✅ <b>";
-    m += title;
-    m += "</b>";
-    m += separator();
-    m += body;
-    m += "\n\n<i>";
-    if (ntpIsSynced()) {
-        m += ntpDateTimeStr();
-    } else {
-        m += "up " + sysFormatDHMS(sysUptimeSec());
-    }
-    m += "</i>";
-
-    return sendMessage(m);
+    String msg = buildMessage(header, lang, 0);
+    return sendMessage(msg);
 }
 
 //--------------------------------------------------------------
-// R09.0: проверка расписания периодического отчёта
+// Проверка расписания периодического отчёта
 //--------------------------------------------------------------
 static bool reportDueToday(struct tm &ti) {
     if (ti.tm_hour < REPORT_HOUR) return false;
@@ -430,6 +440,13 @@ static bool reportDueToday(struct tm &ti) {
 void telegramLoop() {
     if (!s_ready) return;
 
+    // R10.6: boot-отчёт через 3 сек после старта — один раз
+    if (!s_bootReportDone &&
+        (uint32_t)(millis() - s_bootAtMs) >= BOOT_REPORT_DELAY_MS) {
+        s_bootReportDone = true;
+        telegramQueueBootReport();
+    }
+
     String msg;
     if (queuePop(msg)) {
         sendMessage(msg);
@@ -444,7 +461,7 @@ void telegramLoop() {
             s_lastReportDay  = ti.tm_mday;
             s_lastReportMon  = ti.tm_mon + 1;
             s_lastReportYear = ti.tm_year + 1900;
-            telegramQueueReport("ru");
+            telegramQueueReport(s_cfg.uiLang);
         }
     }
 }
