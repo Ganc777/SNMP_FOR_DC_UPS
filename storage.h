@@ -1,15 +1,17 @@
 //==============================================================
 // SNMP_FOR_DC_UPS
-// Release : R09.6
+// Release : R10.9
 // File    : storage.h
 //==============================================================
-// R06.0: добавлены поля Telegram в Config.
-// R07.0: добавлены поля Email (SMTP) в Config.
-// R07.7: удалено неиспользуемое поле logMaxBytes.
-// R09.0: добавлены поля uiLang и uiEventMask.
-// R09.6: ntpUse удалён из Config (NTP всегда включён).
-//        Добавлены ntpSyncHour и ntpSyncMin — время начала
-//        окна синхронизации NTP (окно 1 час).
+// Структура Config и API NVS.
+//
+// История:
+//   R06.0: добавлены поля Telegram.
+//   R07.0: добавлены поля Email.
+//   R07.7: удалено logMaxBytes.
+//   R09.0: добавлены uiLang, uiEventMask.
+//   R09.6: ntpUse удалён; добавлены ntpSyncHour, ntpSyncMin.
+//   R10.9: добавлены otaUser, otaPass (хранятся в NVS).
 //==============================================================
 
 #ifndef STORAGE_H
@@ -31,8 +33,6 @@ struct Config {
     String   dns;
 
     // NTP
-    // R09.6: поле ntpUse удалено — NTP всегда включён.
-    // Время начала окна синхронизации (окно 1 час).
     String   ntpServer1;
     String   ntpServer2;
     String   ntpTz;
@@ -79,14 +79,14 @@ struct Config {
     uint16_t wolStableSec;
     uint8_t  wolBattMinPct;
 
-    // Telegram (R06.0)
+    // Telegram
     String   tgToken;
     String   tgChatId;
     bool     tgEnable;
     uint16_t tgPeriod;
     uint16_t tgEvents;
 
-    // Email (R07.0)
+    // Email
     String   emSmtpHost;
     uint16_t emSmtpPort;
     String   emUser;
@@ -97,9 +97,13 @@ struct Config {
     uint16_t emPeriod;
     uint16_t emEvents;
 
-    // UI (R09.0)
-    String   uiLang;        // "ru" / "en"
-    uint16_t uiEventMask;   // чекбоксы событий на вкладке Графики
+    // UI
+    String   uiLang;
+    uint16_t uiEventMask;
+
+    // R10.9: OTA
+    String   otaUser;
+    String   otaPass;
 };
 
 void storageLoad(Config &cfg);
