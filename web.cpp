@@ -1,6 +1,6 @@
 //==============================================================
 // SNMP_FOR_DC_UPS
-// Release : R10.5
+// Release : R10.9
 // File    : web.cpp
 //==============================================================
 // Веб-сервер: дашборд, настройки, калибровка, логи, OTA.
@@ -12,13 +12,18 @@
 //   R08.x: навигация по графику ◄ ►, индикатор загрузки.
 //   R09.x: uiLang/uiEventMask в NVS, beforeunload, NTP.
 //   R10.x: подсветка событий, цвета OK/FAIL, стек иконок по X.
-//   R10.5: - parseLogLines() под компактный формат [LOG]:
-//            8.38V/99%|12.14V/OK|3809s|57.8C
-//          - поддержка timestamp "up HH:MM:SS" без NTP.
-//          - recalcFill(): LOG_LINE_BYTES=60, поправка 0.9.
-//          - значение "~X d Y h" выделено белым (<b>).
-//          - handleApiUiConfig(): применять uiLang в TG/EM
-//            без перезагрузки (telegramSetConfig + emailSetConfig).
+//   R10.5: parseLogLines() под компактный формат; recalcFill();
+//          язык без reboot.
+//   R10.9: - Убраны со страницы поля «Гистерезис», «Период АЦП».
+//            Остаются в config.h.
+//          - Добавлены поля OTA-логина/OTA-пароля (сохраняются
+//            в NVS; при первом запуске берутся из config.h).
+//          - Убрано статичное пояснение под полем NTP.
+//          - Добавлены SVG-иконки ⓘ к каждому заголовку поля,
+//            с кастомным tooltip-ом (мгновенный, стилизованный).
+//          - Все tooltip-ы локализованы RU/EN.
+//          - График: minStepSize=0.1 В по оси Y, чтобы не
+//            дробить деление при единственной серии.
 //==============================================================
 
 #include "web.h"
@@ -78,7 +83,8 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLDOC(
         gap:12px;margin-bottom:20px;}
   .card{background:var(--card);border:1px solid var(--bord);
         border-radius:10px;padding:14px;}
-  .label{color:var(--dim);font-size:12px;margin-bottom:2px;}
+  .label{color:var(--dim);font-size:12px;margin-bottom:2px;
+    display:inline-flex;align-items:center;gap:6px;}
   .value{font-size:22px;font-weight:600;}
   .unit{color:var(--dim);font-size:14px;font-weight:400;}
   .state-NORMAL{color:var(--ok);}
@@ -216,7 +222,35 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLDOC(
 
   .ntp-time{display:grid;grid-template-columns:90px 90px;gap:6px;
     align-items:center;}
-  .ntp-hint{color:#8cf;font-size:11px;margin-top:4px;line-height:1.4;}
+
+  .fi {
+    display:inline-block;
+    vertical-align:middle;
+    width:14px;height:14px;
+    margin-left:5px;
+    cursor:help;
+    opacity:0.75;
+    transition:opacity .15s;
+  }
+  .fi:hover { opacity:1.0; }
+
+  #tipField {
+    position:fixed;
+    background:rgba(10,15,25,0.97);
+    color:#e8f4ff;
+    border:1px solid var(--accent);
+    border-radius:6px;
+    padding:8px 12px;
+    font-size:12px;
+    line-height:1.5;
+    max-width:340px;
+    pointer-events:none;
+    z-index:2000;
+    display:none;
+    box-shadow:0 4px 18px rgba(0,0,0,0.8);
+    white-space:normal;
+  }
+  #tipField b { color:#7cb8ff; }
 </style>
 </head>
 <body>
@@ -283,33 +317,33 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLDOC(
 <div class="tab-pane active" id="tab-net">
   <div class="row3">
     <div>
-      <div class="field"><div class="label" data-i18n="lblSsid">SSID</div>
+      <div class="field"><div class="label"><span data-i18n="lblSsid">SSID</span><span class="fi" data-tip="tipSsid"></span></div>
         <input id="c_wifiSsid"></div>
-      <div class="field"><div class="label" data-i18n="lblPassword">Пароль</div>
+      <div class="field"><div class="label"><span data-i18n="lblPassword">Пароль</span><span class="fi" data-tip="tipWifiPass"></span></div>
         <input id="c_wifiPass" type="password"></div>
-      <div class="field"><div class="label">Hostname</div>
+      <div class="field"><div class="label"><span>Hostname</span><span class="fi" data-tip="tipHostname"></span></div>
         <input id="c_hostname"></div>
-      <div class="field"><div class="label" data-i18n="lblIpMode">Режим IP</div>
+      <div class="field"><div class="label"><span data-i18n="lblIpMode">Режим IP</span><span class="fi" data-tip="tipIpMode"></span></div>
         <select id="c_useDhcp">
           <option value="0" data-i18n="static">Статический</option>
           <option value="1">DHCP</option>
         </select>
       </div>
-      <div class="field"><div class="label">IP</div>
+      <div class="field"><div class="label"><span>IP</span><span class="fi" data-tip="tipIp"></span></div>
         <input id="c_ip"></div>
-      <div class="field"><div class="label" data-i18n="lblNetmask">Маска</div>
+      <div class="field"><div class="label"><span data-i18n="lblNetmask">Маска</span><span class="fi" data-tip="tipMask"></span></div>
         <input id="c_mask"></div>
-      <div class="field"><div class="label" data-i18n="lblGateway">Шлюз</div>
-        <input id="c_gw"></div>
     </div>
     <div>
-      <div class="field"><div class="label">DNS</div>
+      <div class="field"><div class="label"><span data-i18n="lblGateway">Шлюз</span><span class="fi" data-tip="tipGw"></span></div>
+        <input id="c_gw"></div>
+      <div class="field"><div class="label"><span>DNS</span><span class="fi" data-tip="tipDns"></span></div>
         <input id="c_dns"></div>
-      <div class="field"><div class="label" data-i18n="lblNtpSrv1">NTP-сервер 1</div>
+      <div class="field"><div class="label"><span data-i18n="lblNtpSrv1">NTP-сервер 1</span><span class="fi" data-tip="tipNtpSrv1"></span></div>
         <input id="c_ntpServer1"></div>
-      <div class="field"><div class="label" data-i18n="lblNtpSrv2">NTP-сервер 2</div>
+      <div class="field"><div class="label"><span data-i18n="lblNtpSrv2">NTP-сервер 2</span><span class="fi" data-tip="tipNtpSrv2"></span></div>
         <input id="c_ntpServer2"></div>
-      <div class="field"><div class="label" data-i18n="lblTimezone">Часовой пояс</div>
+      <div class="field"><div class="label"><span data-i18n="lblTimezone">Часовой пояс</span><span class="fi" data-tip="tipTz"></span></div>
         <select id="c_ntpTz">
           <option value="UTC0" data-tz="tzUTC">UTC (UTC+0)</option>
           <option value="MSK-3" data-tz="tzMSK">Москва (UTC+3)</option>
@@ -337,35 +371,28 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLDOC(
         </select>
       </div>
       <div class="field">
-        <div class="label" data-i18n="lblNtpSyncTime">Начало окна синхронизации NTP</div>
+        <div class="label"><span data-i18n="lblNtpSyncTime">Начало окна синхронизации NTP</span><span class="fi" data-tip="tipNtpSync"></span></div>
         <div class="ntp-time">
           <select id="c_ntpSyncHour"></select>
           <select id="c_ntpSyncMin"></select>
         </div>
-        <div class="ntp-hint" data-i18n="ntpSyncHint">
-          Окно синхронизации — 1 час. До 3 попыток с интервалом 30 мин.
-        </div>
       </div>
-      <div class="field"><div class="label" data-i18n="lblTempHighC">Порог температуры, °C</div>
+      <div class="field"><div class="label"><span data-i18n="lblTempHighC">Порог температуры, °C</span><span class="fi" data-tip="tipTempHigh"></span></div>
         <input id="c_tempHighC" type="number" step="0.1"></div>
-      <div class="field"><div class="label" data-i18n="lblBattFullV">Батарея полная, В</div>
-        <input id="c_battFullV" type="number" step="0.01"></div>
     </div>
     <div>
-      <div class="field"><div class="label" data-i18n="lblBattWarnV">Предупреждение, В</div>
+      <div class="field"><div class="label"><span data-i18n="lblBattFullV">Батарея полная, В</span><span class="fi" data-tip="tipBattFull"></span></div>
+        <input id="c_battFullV" type="number" step="0.01"></div>
+      <div class="field"><div class="label"><span data-i18n="lblBattWarnV">Предупреждение, В</span><span class="fi" data-tip="tipBattWarn"></span></div>
         <input id="c_battWarnV" type="number" step="0.01"></div>
-      <div class="field"><div class="label" data-i18n="lblBattEmptyV">Батарея пустая, В</div>
+      <div class="field"><div class="label"><span data-i18n="lblBattEmptyV">Батарея пустая, В</span><span class="fi" data-tip="tipBattEmpty"></span></div>
         <input id="c_battEmptyV" type="number" step="0.01"></div>
-      <div class="field"><div class="label" data-i18n="lblBattCapacityWh">Ёмкость, Вт·ч</div>
+      <div class="field"><div class="label"><span data-i18n="lblBattCapacityWh">Ёмкость, Вт·ч</span><span class="fi" data-tip="tipBattCapacity"></span></div>
         <input id="c_battCapacityWh" type="number" step="0.01"></div>
-      <div class="field"><div class="label" data-i18n="lblInputLostV">Пропадание входа, В</div>
+      <div class="field"><div class="label"><span data-i18n="lblInputLostV">Пропадание входа, В</span><span class="fi" data-tip="tipInputLost"></span></div>
         <input id="c_inputLostV" type="number" step="0.01"></div>
-      <div class="field"><div class="label" data-i18n="lblLoadCurrentA">Ток нагрузки, А</div>
+      <div class="field"><div class="label"><span data-i18n="lblLoadCurrentA">Ток нагрузки, А</span><span class="fi" data-tip="tipLoadCurrent"></span></div>
         <input id="c_loadCurrentA" type="number" step="0.01"></div>
-      <div class="field"><div class="label" data-i18n="lblHystV">Гистерезис, В</div>
-        <input id="c_hystV" type="number" step="0.01"></div>
-      <div class="field"><div class="label" data-i18n="lblAdcPollMs">Период АЦП, мс</div>
-        <input id="c_adcPollMs" type="number"></div>
     </div>
   </div>
 
@@ -378,25 +405,25 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLDOC(
 
 <div class="tab-pane" id="tab-snmp">
   <div class="row2">
-    <div><div class="label" data-i18n="lblQnapIp">IP QNAP (адрес NAS-сервера)</div>
+    <div><div class="label"><span data-i18n="lblQnapIp">IP QNAP (адрес NAS-сервера)</span><span class="fi" data-tip="tipQnapIp"></span></div>
       <input id="c_qnapIp"></div>
-    <div><div class="label" data-i18n="lblQnapMac">MAC-адрес QNAP (для WoL)</div>
+    <div><div class="label"><span data-i18n="lblQnapMac">MAC-адрес QNAP (для WoL)</span><span class="fi" data-tip="tipQnapMac"></span></div>
       <input id="c_qnapMac" placeholder="AA:BB:CC:DD:EE:FF"></div>
   </div>
   <div class="row2">
-    <div><div class="label" data-i18n="lblCommunity">Community (Группа доступа)</div>
+    <div><div class="label"><span data-i18n="lblCommunity">Community (Группа доступа)</span><span class="fi" data-tip="tipCommunity"></span></div>
       <input id="c_snmpCommunity"></div>
-    <div><div class="label" data-i18n="lblAgentPort">Порт агента</div>
+    <div><div class="label"><span data-i18n="lblAgentPort">Порт агента</span><span class="fi" data-tip="tipSnmpPort"></span></div>
       <input id="c_snmpPort" type="number"></div>
   </div>
   <div class="row2">
-    <div><div class="label" data-i18n="lblInformType">Тип уведомлений</div>
+    <div><div class="label"><span data-i18n="lblInformType">Тип уведомлений</span><span class="fi" data-tip="tipInformType"></span></div>
       <select id="c_useInform">
         <option value="1">INFORM</option>
         <option value="0">TRAP</option>
       </select>
     </div>
-    <div><div class="label" data-i18n="lblEnterpriseOid">OID производителя</div>
+    <div><div class="label"><span data-i18n="lblEnterpriseOid">OID производителя</span><span class="fi" data-tip="tipEntOid"></span></div>
       <input id="c_enterpriseOid"></div>
   </div>
   <div class="pane-actions">
@@ -409,14 +436,13 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLDOC(
   <div class="row2">
     <div>
       <h2 data-i18n="battery">Аккумулятор</h2>
-      <div class="info" data-i18n="calHint">Введи реальное напряжение, измеренное мультиметром.
-        Коэффициент gain рассчитается автоматически.</div>
+      <div class="info" data-i18n="calHint">Введи реальное напряжение, измеренное мультиметром. Коэффициент gain рассчитается автоматически.</div>
       <div class="calhead">
         <span data-i18n="now">Сейчас</span>: off=<span id="cal_batt_off_show">—</span> mV,
         gain=<span id="cal_batt_gain_show">—</span>,
         <span data-i18n="reading">показание</span>=<span id="cal_batt_v">—</span> <span data-i18n="voltUnit">В</span>
       </div>
-      <div><div class="label" data-i18n="lblRealVoltage">Реальное напряжение, В</div>
+      <div><div class="label"><span data-i18n="lblRealVoltage">Реальное напряжение, В</span><span class="fi" data-tip="tipCalRealBatt"></span></div>
         <input id="cal_batt_real" type="number" step="0.001"></div>
       <div class="actions">
         <button onclick="applyCal('batt')" data-i18n="calcGain">Рассчитать gain</button>
@@ -425,14 +451,13 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLDOC(
     </div>
     <div>
       <h2 data-i18n="input12">Вход 12 В</h2>
-      <div class="info" data-i18n="calHint">Введи реальное напряжение, измеренное мультиметром.
-        Коэффициент gain рассчитается автоматически.</div>
+      <div class="info" data-i18n="calHint">Введи реальное напряжение, измеренное мультиметром. Коэффициент gain рассчитается автоматически.</div>
       <div class="calhead">
         <span data-i18n="now">Сейчас</span>: off=<span id="cal_input_off_show">—</span> mV,
         gain=<span id="cal_input_gain_show">—</span>,
         <span data-i18n="reading">показание</span>=<span id="cal_input_v">—</span> <span data-i18n="voltUnit">В</span>
       </div>
-      <div><div class="label" data-i18n="lblRealVoltage">Реальное напряжение, В</div>
+      <div><div class="label"><span data-i18n="lblRealVoltage">Реальное напряжение, В</span><span class="fi" data-tip="tipCalRealInput"></span></div>
         <input id="cal_input_real" type="number" step="0.001"></div>
       <div class="actions">
         <button onclick="applyCal('input')" data-i18n="calcGain">Рассчитать gain</button>
@@ -456,30 +481,29 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLDOC(
     Пакет отправляется один раз за цикл аварии.
   </div>
   <div class="row2">
-    <div><div class="label" data-i18n="lblQnapIp">IP QNAP (адрес NAS-сервера)</div>
+    <div><div class="label"><span data-i18n="lblQnapIp">IP QNAP (адрес NAS-сервера)</span><span class="fi" data-tip="tipQnapIp"></span></div>
       <input id="c2_qnapIp">
       <div class="dupe" data-i18n="syncSnmpHint">Синхронизируется с вкладкой SNMP</div>
     </div>
-    <div><div class="label" data-i18n="lblQnapMac">MAC-адрес QNAP (для WoL)</div>
+    <div><div class="label"><span data-i18n="lblQnapMac">MAC-адрес QNAP (для WoL)</span><span class="fi" data-tip="tipQnapMac"></span></div>
       <input id="c2_qnapMac" placeholder="AA:BB:CC:DD:EE:FF">
       <div class="dupe" data-i18n="syncSnmpHint">Синхронизируется с вкладкой SNMP</div>
     </div>
   </div>
   <div class="row2">
-    <div><div class="label" data-i18n="lblWolEnabled">Автозапуск включён
-        (включить NAS после восстановления питания)</div>
+    <div><div class="label"><span data-i18n="lblWolEnabled">Автозапуск включён</span><span class="fi" data-tip="tipWolEnable"></span></div>
       <select id="c_wolEnable">
         <option value="1" data-i18n="yes">Да</option>
         <option value="0" data-i18n="no">Нет</option>
       </select>
     </div>
-    <div><div class="label" data-i18n="lblWolOutage">Пропадание питания более чем, сек</div>
+    <div><div class="label"><span data-i18n="lblWolOutage">Пропадание питания более чем, сек</span><span class="fi" data-tip="tipWolOutage"></span></div>
       <input id="c_wolOutageMinSec" type="number"></div>
   </div>
   <div class="row2">
-    <div><div class="label" data-i18n="lblWolStable">Есть стабильное питание более чем, сек</div>
+    <div><div class="label"><span data-i18n="lblWolStable">Есть стабильное питание более чем, сек</span><span class="fi" data-tip="tipWolStable"></span></div>
       <input id="c_wolStableSec" type="number"></div>
-    <div><div class="label" data-i18n="lblWolBattPct">Мин. заряд батареи, %</div>
+    <div><div class="label"><span data-i18n="lblWolBattPct">Мин. заряд батареи, %</span><span class="fi" data-tip="tipWolBattPct"></span></div>
       <input id="c_wolBattMinPct" type="number"></div>
   </div>
   <div class="sub">
@@ -500,23 +524,23 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLDOC(
     Категории событий фильтруют, какие уведомления отправлять.
   </div>
   <div class="row2">
-    <div><div class="label" data-i18n="lblTgToken">Bot Token</div>
+    <div><div class="label"><span data-i18n="lblTgToken">Bot Token</span><span class="fi" data-tip="tipTgToken"></span></div>
       <input id="c_tgToken" type="password" placeholder="123456789:AA...">
       <div class="dupe" data-i18n="tgTokenHint">Получить у @BotFather</div>
     </div>
-    <div><div class="label" data-i18n="lblTgChatId">Chat ID</div>
+    <div><div class="label"><span data-i18n="lblTgChatId">Chat ID</span><span class="fi" data-tip="tipTgChatId"></span></div>
       <input id="c_tgChatId" placeholder="123456789">
       <div class="dupe" data-i18n="tgChatHint">Узнать у @userinfobot</div>
     </div>
   </div>
   <div class="row2">
-    <div><div class="label" data-i18n="lblTgEnabled">Отправка включена</div>
+    <div><div class="label"><span data-i18n="lblTgEnabled">Отправка включена</span><span class="fi" data-tip="tipTgEnable"></span></div>
       <select id="c_tgEnable">
         <option value="1" data-i18n="yes">Да</option>
         <option value="0" data-i18n="no">Нет</option>
       </select>
     </div>
-    <div><div class="label" data-i18n="lblTgPeriod">Периодический отчёт</div>
+    <div><div class="label"><span data-i18n="lblTgPeriod">Периодический отчёт</span><span class="fi" data-tip="tipTgPeriod"></span></div>
       <select id="c_tgPeriod">
         <option value="0" data-i18n="tgPeriodNone">Нет</option>
         <option value="1" data-i18n="tgPeriodDay">День</option>
@@ -559,35 +583,35 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLDOC(
     Категории событий фильтруют, какие уведомления отправлять.
   </div>
   <div class="row2">
-    <div><div class="label" data-i18n="lblEmHost">SMTP-сервер</div>
+    <div><div class="label"><span data-i18n="lblEmHost">SMTP-сервер</span><span class="fi" data-tip="tipEmHost"></span></div>
       <input id="c_emSmtpHost" placeholder="smtp.mail.ru"></div>
-    <div><div class="label" data-i18n="lblEmPort">Порт (465 — SSL)</div>
+    <div><div class="label"><span data-i18n="lblEmPort">Порт (465 — SSL)</span><span class="fi" data-tip="tipEmPort"></span></div>
       <input id="c_emSmtpPort" type="number" placeholder="465"></div>
   </div>
   <div class="row2">
-    <div><div class="label" data-i18n="lblEmUser">Логин (email)</div>
+    <div><div class="label"><span data-i18n="lblEmUser">Логин (email)</span><span class="fi" data-tip="tipEmUser"></span></div>
       <input id="c_emUser" placeholder="user@mail.ru">
       <div class="dupe" data-i18n="emUserHint">Обычно совпадает с адресом From</div>
     </div>
-    <div><div class="label" data-i18n="lblEmPass">Пароль (App Password)</div>
+    <div><div class="label"><span data-i18n="lblEmPass">Пароль (App Password)</span><span class="fi" data-tip="tipEmPass"></span></div>
       <input id="c_emPass" type="password" placeholder="******">
       <div class="dupe" data-i18n="emPassHint">Mail.ru: Настройки → Пароли для внешних приложений</div>
     </div>
   </div>
   <div class="row2">
-    <div><div class="label" data-i18n="lblEmFrom">От кого (From)</div>
+    <div><div class="label"><span data-i18n="lblEmFrom">От кого (From)</span><span class="fi" data-tip="tipEmFrom"></span></div>
       <input id="c_emFrom" placeholder="user@mail.ru"></div>
-    <div><div class="label" data-i18n="lblEmTo">Кому (To)</div>
+    <div><div class="label"><span data-i18n="lblEmTo">Кому (To)</span><span class="fi" data-tip="tipEmTo"></span></div>
       <input id="c_emTo" placeholder="user@mail.ru"></div>
   </div>
   <div class="row2">
-    <div><div class="label" data-i18n="lblEmEnabled">Отправка включена</div>
+    <div><div class="label"><span data-i18n="lblEmEnabled">Отправка включена</span><span class="fi" data-tip="tipEmEnable"></span></div>
       <select id="c_emEnable">
         <option value="1" data-i18n="yes">Да</option>
         <option value="0" data-i18n="no">Нет</option>
       </select>
     </div>
-    <div><div class="label" data-i18n="lblEmPeriod">Периодический отчёт</div>
+    <div><div class="label"><span data-i18n="lblEmPeriod">Периодический отчёт</span><span class="fi" data-tip="tipEmPeriod"></span></div>
       <select id="c_emPeriod">
         <option value="0" data-i18n="tgPeriodNone">Нет</option>
         <option value="1" data-i18n="tgPeriodDay">День</option>
@@ -702,7 +726,7 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLDOC(
 
     <div>
       <div class="label">
-        <span data-i18n="logPeriod">Период записи</span>
+        <span data-i18n="logPeriod">Период записи</span><span class="fi" data-tip="tipLogPeriod"></span>
         (<span data-i18n="fillIn">свежий заполнится за</span>
         ~<b class="fillval"><span id="lc_fill1">—</span></b>)
       </div>
@@ -743,19 +767,39 @@ static const char DASHBOARD_HTML[] PROGMEM = R"HTMLDOC(
   <h2 data-i18n="otaTitle">Обновление прошивки по воздуху</h2>
   <p class="sub" data-i18n="otaHint">Нажми кнопку ниже, откроется страница загрузки.</p>
   <a class="ota-link" href="/update" target="_blank" data-i18n="otaOpen">Открыть страницу обновления</a>
+
+  <h2 style="margin-top:24px" data-i18n="otaCredTitle">Учётные данные OTA</h2>
+  <div class="row2">
+    <div><div class="label"><span data-i18n="lblOtaUser">OTA логин</span><span class="fi" data-tip="tipOtaUser"></span></div>
+      <input id="c_otaUser" placeholder="admin"></div>
+    <div><div class="label"><span data-i18n="lblOtaPass">OTA пароль</span><span class="fi" data-tip="tipOtaPass"></span></div>
+      <input id="c_otaPass" type="password" placeholder="••••••••"></div>
+  </div>
+
   <p class="sub" style="margin-top:16px" data-i18n="otaSteps">
     1. В Arduino IDE: Скетч → Экспорт бинарного файла.<br>
     2. Получится файл .ino.bin.<br>
     3. Открой страницу обновления, выбери файл, нажми «Обновить».<br>
     4. Устройство перезагрузится автоматически.
   </p>
+
+  <div class="pane-actions">
+    <button onclick="saveAllPanes()" data-i18n="saveChanges">Сохранить изменения</button>
+    <button class="danger" onclick="resetPane('ota')" data-i18n="resetChanges">Сбросить изменения</button>
+  </div>
 </div>
 
 <div class="footer" data-i18n="footer">Страница обновляется раз в 2 секунды.</div>
 
 <div class="evt-tip" id="evtTip"></div>
+<div id="tipField"></div>
 
 <script>
+//=================================================================
+// R10.9: SVG-иконка «i» для заголовков полей
+//=================================================================
+const ICON_I = '<svg viewBox="0 0 16 16" width="14" height="14"><circle cx="8" cy="8" r="7" fill="none" stroke="#4ea1ff" stroke-width="1.5"/><rect x="7.2" y="6.6" width="1.6" height="5" fill="#4ea1ff"/><rect x="7.2" y="4.2" width="1.6" height="1.6" fill="#4ea1ff"/></svg>';
+
 //=================================================================
 // SVG-ФЛАГИ
 //=================================================================
@@ -826,7 +870,6 @@ const i18n = {
     lblNtpSrv2: "NTP-сервер 2",
     lblTimezone: "Часовой пояс",
     lblNtpSyncTime: "Начало окна синхронизации NTP",
-    ntpSyncHint: "Окно синхронизации — 1 час. До 3 попыток с интервалом 30 мин.",
     lblTempHighC: "Порог температуры, °C",
     lblBattFullV: "Батарея полная, В",
     lblBattWarnV: "Предупреждение, В",
@@ -834,8 +877,6 @@ const i18n = {
     lblBattCapacityWh: "Ёмкость, Вт·ч",
     lblInputLostV: "Пропадание входа, В",
     lblLoadCurrentA: "Ток нагрузки, А",
-    lblHystV: "Гистерезис, В",
-    lblAdcPollMs: "Период АЦП, мс",
     lblQnapIp: "IP QNAP (адрес NAS-сервера)",
     lblQnapMac: "MAC-адрес QNAP (для WoL)",
     lblCommunity: "Community (Группа доступа)",
@@ -843,7 +884,7 @@ const i18n = {
     lblInformType: "Тип уведомлений",
     lblEnterpriseOid: "OID производителя",
     lblRealVoltage: "Реальное напряжение, В",
-    lblWolEnabled: "Автозапуск включён (включить NAS после восстановления питания)",
+    lblWolEnabled: "Автозапуск включён",
     lblWolOutage: "Пропадание питания более чем, сек",
     lblWolStable: "Есть стабильное питание более чем, сек",
     lblWolBattPct: "Мин. заряд батареи, %",
@@ -859,6 +900,8 @@ const i18n = {
     lblEmTo: "Кому (To)",
     lblEmEnabled: "Отправка включена",
     lblEmPeriod: "Периодический отчёт",
+    lblOtaUser: "OTA логин",
+    lblOtaPass: "OTA пароль",
 
     static: "Статический",
     yes: "Да",
@@ -930,6 +973,7 @@ const i18n = {
     clear: "Очистить",
     logHint: "Нажми «Прочитать», чтобы открыть лог.",
     otaTitle: "Обновление прошивки по воздуху",
+    otaCredTitle: "Учётные данные OTA",
     otaHint: "Нажми кнопку ниже, откроется страница загрузки.",
     otaOpen: "Открыть страницу обновления",
     otaSteps: "1. В Arduino IDE: Скетч → Экспорт бинарного файла.<br>2. Получится файл .ino.bin.<br>3. Открой страницу обновления, выбери файл, нажми «Обновить».<br>4. Устройство перезагрузится автоматически.",
@@ -978,6 +1022,7 @@ const i18n = {
     paneWol: "Автозапуск",
     paneTg: "Telegram",
     paneEm: "Email",
+    paneOta: "Обновление",
 
     stateNORMAL:     "Норма",
     stateINPUT_LOST: "Питание пропало",
@@ -1041,7 +1086,62 @@ const i18n = {
     tipEvtEmOk:       "Email: отправлено",
     tipEvtEmFail:     "Email: ошибка",
 
-    leaveWarn: "На странице есть несохранённые изменения. Покинуть без сохранения?"
+    leaveWarn: "На странице есть несохранённые изменения. Покинуть без сохранения?",
+
+    // ---------- R10.9: tooltips ----------
+    tipSsid:       "Имя вашей Wi-Fi сети 2,4 ГГц. Чувствительно к регистру.",
+    tipWifiPass:   "Пароль Wi-Fi. Хранится в NVS. Если не указать — устройство не подключится к сети (режима AP нет).",
+    tipHostname:   "Сетевое имя устройства. Отображается в роутере и mDNS.",
+    tipIpMode:     "Статический IP — адрес вводится вручную (по умолчанию 192.168.1.150). DHCP — адрес выдаёт роутер автоматически.",
+    tipIp:         "IP-адрес устройства. Используется для доступа к веб-дашборду, SNMP и OTA.",
+    tipMask:       "Маска подсети. Обычно 255.255.255.0.",
+    tipGw:         "Адрес шлюза (роутера). Обычно 192.168.1.1.",
+    tipDns:        "DNS-сервер для разрешения имён (NTP, Telegram, SMTP). Обычно совпадает со шлюзом.",
+    tipNtpSrv1:    "Основной NTP-сервер. По умолчанию pool.ntp.org.",
+    tipNtpSrv2:    "Резервный NTP-сервер. По умолчанию time.google.com.",
+    tipTz:         "Часовой пояс. Влияет на все временные метки в логе и уведомлениях.",
+    tipNtpSync:    "NTP всегда включён. Раз в сутки — плановая синхронизация в окне 1 час, до 3 попыток с интервалом 30 мин. Третья попытка может выйти за границу окна. Окно не может пересекать полночь.",
+    tipTempHigh:   "Порог температуры кристалла ESP32 (°C). При превышении — событие TEMP_HIGH и уведомления. Гистерезис 5 °C.",
+    tipBattFull:   "Напряжение полностью заряженной батареи (100%). Для 2S Li-ion — 8,4 В.",
+    tipBattWarn:   "Порог низкого заряда. При падении ниже — состояние LOW_BATT и уведомления.",
+    tipBattEmpty:  "Порог «батарея пуста» (0%). При падении ниже — состояние CRITICAL, QNAP выключается.",
+    tipBattCapacity:"Расчётная ёмкость батареи в Вт·ч. Используется для прогноза runtime.",
+    tipInputLost:  "Порог пропадания входного питания. Ниже — фиксируется INPUT_LOST. Гистерезис 0,2 В.",
+    tipLoadCurrent:"Средний ток нагрузки в амперах при 12 В. Используется для расчёта runtime.",
+
+    tipQnapIp:     "IP-адрес QNAP NAS. На него отправляются SNMP INFORM/TRAP при авариях.",
+    tipQnapMac:    "MAC-адрес QNAP в формате AA:BB:CC:DD:EE:FF. Используется для Wake-on-LAN.",
+    tipCommunity:  "SNMP community (по умолчанию public). Должно совпадать в QNAP.",
+    tipSnmpPort:   "Порт SNMP-агента. Стандартный — 161.",
+    tipInformType: "INFORM — с подтверждением (надёжнее). TRAP — без подтверждения.",
+    tipEntOid:     "Корневой OID приватной ветки. По умолчанию 1.3.6.1.4.1.99999.",
+
+    tipCalRealBatt:"Замерьте напряжение АКБ мультиметром и введите точное значение. Gain рассчитается автоматически.",
+    tipCalRealInput:"Замерьте напряжение входа 12 В мультиметром и введите точное значение.",
+
+    tipWolEnable:  "Включить автозапуск QNAP через Wake-on-LAN после восстановления питания.",
+    tipWolOutage:  "Минимальная длительность пропадания питания (сек), после которой срабатывает WoL.",
+    tipWolStable:  "Минимальное время стабильного питания после восстановления (сек).",
+    tipWolBattPct: "Минимальный заряд батареи (%), при котором разрешён WoL.",
+
+    tipTgToken:    "Токен бота от @BotFather. Хранится в NVS.",
+    tipTgChatId:   "ID чата получателя. Узнать у @userinfobot. Не забудьте написать боту /start.",
+    tipTgEnable:   "Глобальный флаг отправки уведомлений в Telegram.",
+    tipTgPeriod:   "Периодический отчёт в 12:00: каждый день / по понедельникам / 1-го числа. «Нет» — отключено.",
+
+    tipEmHost:     "SMTP-сервер. Mail.ru: smtp.mail.ru.",
+    tipEmPort:     "Порт SMTP. Для Mail.ru — 465 (SSL, implicit TLS).",
+    tipEmUser:     "Логин — полный адрес email.",
+    tipEmPass:     "Пароль для внешнего приложения (не обычный пароль!). Mail.ru: Настройки → Безопасность → Пароли для внешних приложений.",
+    tipEmFrom:     "Адрес отправителя (обычно совпадает с логином).",
+    tipEmTo:       "Адрес получателя.",
+    tipEmEnable:   "Глобальный флаг отправки уведомлений по Email.",
+    tipEmPeriod:   "Периодический отчёт в 12:00: каждый день / по понедельникам / 1-го числа. «Нет» — отключено.",
+
+    tipOtaUser:    "Логин для страницы /update. Хранится в NVS. Значение по умолчанию — admin.",
+    tipOtaPass:    "Пароль для страницы /update. Хранится в NVS. После первого сохранения через дашборд config.h игнорируется.",
+
+    tipLogPeriod:  "Период записи строк [LOG] в журнал. «Откл.» — только события. Значение влияет на объём и срок хранения истории."
   },
   en: {
     curTime: "Current time",
@@ -1078,7 +1178,6 @@ const i18n = {
     lblNtpSrv2: "NTP server 2",
     lblTimezone: "Timezone",
     lblNtpSyncTime: "NTP sync window start",
-    ntpSyncHint: "Sync window is 1 hour. Up to 3 attempts with 30 min interval.",
     lblTempHighC: "Temperature threshold, °C",
     lblBattFullV: "Battery full, V",
     lblBattWarnV: "Warning threshold, V",
@@ -1086,8 +1185,6 @@ const i18n = {
     lblBattCapacityWh: "Capacity, Wh",
     lblInputLostV: "Input lost, V",
     lblLoadCurrentA: "Load current, A",
-    lblHystV: "Hysteresis, V",
-    lblAdcPollMs: "ADC period, ms",
     lblQnapIp: "QNAP IP (NAS address)",
     lblQnapMac: "QNAP MAC (for WoL)",
     lblCommunity: "Community (access group)",
@@ -1095,7 +1192,7 @@ const i18n = {
     lblInformType: "Notification type",
     lblEnterpriseOid: "Vendor OID",
     lblRealVoltage: "Real voltage, V",
-    lblWolEnabled: "Auto-start enabled (wake NAS after power restore)",
+    lblWolEnabled: "Auto-start enabled",
     lblWolOutage: "Power outage more than, s",
     lblWolStable: "Stable power more than, s",
     lblWolBattPct: "Min. battery charge, %",
@@ -1111,6 +1208,8 @@ const i18n = {
     lblEmTo: "To address",
     lblEmEnabled: "Sending enabled",
     lblEmPeriod: "Periodic report",
+    lblOtaUser: "OTA username",
+    lblOtaPass: "OTA password",
 
     static: "Static",
     yes: "Yes",
@@ -1182,6 +1281,7 @@ const i18n = {
     clear: "Clear",
     logHint: "Press «Read» to open the log.",
     otaTitle: "Over-the-air firmware update",
+    otaCredTitle: "OTA credentials",
     otaHint: "Press the button below to open the upload page.",
     otaOpen: "Open update page",
     otaSteps: "1. In Arduino IDE: Sketch → Export compiled binary.<br>2. You get a .ino.bin file.<br>3. Open the update page, select the file, press «Update».<br>4. The device will reboot automatically.",
@@ -1230,6 +1330,7 @@ const i18n = {
     paneWol: "Auto-start",
     paneTg: "Telegram",
     paneEm: "Email",
+    paneOta: "Update",
 
     stateNORMAL:     "Normal",
     stateINPUT_LOST: "Input lost",
@@ -1293,7 +1394,62 @@ const i18n = {
     tipEvtEmOk:       "Email: sent",
     tipEvtEmFail:     "Email: FAILED",
 
-    leaveWarn: "There are unsaved changes on this page. Leave without saving?"
+    leaveWarn: "There are unsaved changes on this page. Leave without saving?",
+
+    // ---------- R10.9: tooltips ----------
+    tipSsid:       "Your 2.4 GHz Wi-Fi network name. Case-sensitive.",
+    tipWifiPass:   "Wi-Fi password. Stored in NVS. If not set — device won't connect (no AP mode).",
+    tipHostname:   "Device hostname. Visible in the router and mDNS.",
+    tipIpMode:     "Static IP — set manually (default 192.168.1.150). DHCP — assigned by router.",
+    tipIp:         "Device IP address. Used for web dashboard, SNMP and OTA.",
+    tipMask:       "Subnet mask. Usually 255.255.255.0.",
+    tipGw:         "Gateway address (router). Usually 192.168.1.1.",
+    tipDns:        "DNS server for name resolution (NTP, Telegram, SMTP). Usually equals gateway.",
+    tipNtpSrv1:    "Primary NTP server. Default: pool.ntp.org.",
+    tipNtpSrv2:    "Fallback NTP server. Default: time.google.com.",
+    tipTz:         "Time zone. Affects all timestamps in logs and notifications.",
+    tipNtpSync:    "NTP always enabled. Once a day — scheduled sync in a 1-hour window, up to 3 attempts with 30 min interval. The third attempt may exceed the window. Window cannot cross midnight.",
+    tipTempHigh:   "ESP32 crystal temperature threshold (°C). When exceeded — TEMP_HIGH event and notifications. 5 °C hysteresis.",
+    tipBattFull:   "Fully charged battery voltage (100%). For 2S Li-ion — 8.4 V.",
+    tipBattWarn:   "Low charge threshold. Below — LOW_BATT state and notifications.",
+    tipBattEmpty:  "Empty battery threshold (0%). Below — CRITICAL state, QNAP shuts down.",
+    tipBattCapacity:"Estimated battery capacity in Wh. Used for runtime prediction.",
+    tipInputLost:  "Input power loss threshold. Below — INPUT_LOST is fixed. Hysteresis 0.2 V.",
+    tipLoadCurrent:"Average load current in amperes at 12 V. Used for runtime calculation.",
+
+    tipQnapIp:     "QNAP NAS IP address. SNMP INFORM/TRAP notifications are sent to it.",
+    tipQnapMac:    "QNAP MAC address in AA:BB:CC:DD:EE:FF format. Used for Wake-on-LAN.",
+    tipCommunity:  "SNMP community (default public). Must match in QNAP.",
+    tipSnmpPort:   "SNMP agent port. Standard — 161.",
+    tipInformType: "INFORM — with acknowledgment (more reliable). TRAP — without.",
+    tipEntOid:     "Root OID of the private subtree. Default 1.3.6.1.4.1.99999.",
+
+    tipCalRealBatt:"Measure battery voltage with a multimeter and enter the exact value. Gain will be calculated automatically.",
+    tipCalRealInput:"Measure input 12 V voltage with a multimeter and enter the exact value.",
+
+    tipWolEnable:  "Enable QNAP auto-start via Wake-on-LAN after power restore.",
+    tipWolOutage:  "Minimum power outage duration (s) that triggers WoL.",
+    tipWolStable:  "Minimum stable power time after restore (s).",
+    tipWolBattPct: "Minimum battery charge (%), at which WoL is allowed.",
+
+    tipTgToken:    "Bot token from @BotFather. Stored in NVS.",
+    tipTgChatId:   "Recipient chat ID. Get it from @userinfobot. Don't forget to send /start to the bot.",
+    tipTgEnable:   "Global flag for sending Telegram notifications.",
+    tipTgPeriod:   "Periodic report at 12:00: daily / on Mondays / on the 1st. «None» — disabled.",
+
+    tipEmHost:     "SMTP server. Mail.ru: smtp.mail.ru.",
+    tipEmPort:     "SMTP port. For Mail.ru — 465 (SSL, implicit TLS).",
+    tipEmUser:     "Login — full email address.",
+    tipEmPass:     "External app password (not the regular one!). Mail.ru: Settings → Security → External app passwords.",
+    tipEmFrom:     "Sender address (usually equals login).",
+    tipEmTo:       "Recipient address.",
+    tipEmEnable:   "Global flag for sending Email notifications.",
+    tipEmPeriod:   "Periodic report at 12:00: daily / on Mondays / on the 1st. «None» — disabled.",
+
+    tipOtaUser:    "Username for /update page. Stored in NVS. Default — admin.",
+    tipOtaPass:    "Password for /update page. Stored in NVS. After first save via dashboard config.h is ignored.",
+
+    tipLogPeriod:  "Interval for [LOG] entries. «Off» — events only. Affects the volume and retention of history."
   }
 };
 
@@ -1304,6 +1460,50 @@ function tr(key) {
 function stateLabel(name) {
   return tr('state' + name);
 }
+
+//=================================================================
+// R10.9: подстановка SVG-иконок в заголовки полей
+//=================================================================
+function installFieldIcons() {
+  document.querySelectorAll('.fi').forEach(el => {
+    el.innerHTML = ICON_I;
+  });
+}
+
+//=================================================================
+// R10.9: кастомный tooltip для полей
+//=================================================================
+(function initFieldTooltip() {
+  const tip = document.getElementById('tipField');
+  if (!tip) return;
+
+  document.addEventListener('mouseover', (e) => {
+    const target = e.target.closest('.fi');
+    if (!target) return;
+    const key = target.getAttribute('data-tip');
+    if (!key) return;
+    const txt = tr(key);
+    if (!txt) return;
+    tip.textContent = txt;
+    tip.style.display = 'block';
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (tip.style.display !== 'block') return;
+    const x = e.clientX + 14;
+    const y = e.clientY + 14;
+    const maxX = window.innerWidth - tip.offsetWidth - 10;
+    const maxY = window.innerHeight - tip.offsetHeight - 10;
+    tip.style.left = Math.min(x, maxX) + 'px';
+    tip.style.top  = Math.min(y, maxY) + 'px';
+  });
+
+  document.addEventListener('mouseout', (e) => {
+    const target = e.target.closest('.fi');
+    if (!target) return;
+    tip.style.display = 'none';
+  });
+})();
 
 //=================================================================
 // ФУНКЦИИ ОТОБРАЖЕНИЯ СТАТУСОВ
@@ -1352,7 +1552,7 @@ function updateEmStatus() {
 }
 
 //=================================================================
-// R10.5: селекты часа/минуты для начала окна NTP
+// Селекты часа/минуты для начала окна NTP
 //=================================================================
 function initNtpTimeSelects() {
   const hSel = document.getElementById('c_ntpSyncHour');
@@ -1756,9 +1956,6 @@ function parseEvents(text) {
     { re: /\[EVT\]\s+EM: send FAILED/,         type: 'EM_FAIL',    cat: 'notify' }
   ];
 
-  // R10.5: компактный [LOG] формата:
-  //   2026-10-12 17:03:43 [LOG] 8.38V/99%|12.14V/OK|3809s|57.8C
-  // Группа 1: BATT voltage
   const reLog = /\[LOG\]\s+([\d.]+)V\//;
   for (const line of lines) {
     const mLog = line.match(reLog);
@@ -2038,10 +2235,7 @@ refresh();
 setInterval(refresh, 2000);
 
 //=================================================================
-// R10.5: пересчёт времени заполнения "свежего" файла.
-// Средняя длина строки [LOG] в компактном формате:
-//   2026-10-12 17:03:43 [LOG] 8.38V/99%|12.14V/OK|3809s|57.8C\n = 60 байт
-// Поправка 0.9 — на редкие [EVT]-строки (само событие + TG:OK/EM:OK).
+// R10.5 / R10.9: пересчёт времени заполнения "свежего" файла.
 //=================================================================
 function recalcFill() {
   const sel = document.getElementById('lc_period');
@@ -2183,21 +2377,11 @@ function showMsg(text, ok) {
 
 //=================================================================
 // ПАРСИНГ ЛОГА
-// R10.5: компактный формат:
-//   - "2026-10-12 17:03:43 [LOG] 8.38V/99%|12.14V/OK|3809s|57.8C"
-//   - "up 02:57:03 [LOG] 8.38V/99%|12.14V/OK|3809s|57.8C" (без NTP)
 //=================================================================
 function parseLogLines(text) {
   const lines = text.split(/\r?\n/);
   const points = [];
 
-  // Группа 1: timestamp (либо "YYYY-MM-DD HH:MM:SS", либо "up HH:MM:SS")
-  // Группа 2: BATT voltage
-  // Группа 3: BATT percent
-  // Группа 4: INPUT voltage
-  // Группа 5: INPUT state (OK|LOST)
-  // Группа 6: runtime (sec)
-  // Группа 7: temperature
   const re = /^(.+?)\s+\[LOG\]\s+([\d.]+)V\/(\d+)%\|([\d.]+)V\/(\w+)\|(\d+)s\|([\d.\-]+)C/;
 
   const nowMs = Date.now();
@@ -2215,16 +2399,11 @@ function parseLogLines(text) {
 
     let tMs;
     if (ts.startsWith('up ')) {
-      // "up HH:MM:SS" — относительно boot. Приблизительно:
-      // считаем от текущего времени минус uptime.
       const parts = ts.substring(3).split(':');
       if (parts.length !== 3) continue;
       const upSec = parseInt(parts[0])*3600 + parseInt(parts[1])*60 + parseInt(parts[2]);
-      // Приблизительная оценка — относительно "сейчас".
-      // Более точно восстановить нельзя без сохранённого boot-time.
       tMs = nowMs - upSec * 1000;
     } else {
-      // "YYYY-MM-DD HH:MM:SS"
       const d = new Date(ts.replace(' ', 'T'));
       if (isNaN(d.getTime())) continue;
       tMs = d.getTime();
@@ -2274,6 +2453,11 @@ async function loadChart() {
   }
 }
 
+//=================================================================
+// R10.9: минимальная цена деления по оси Y — 0,1 В.
+// Используем afterBuildTicks: если Chart.js насчитал шаг меньше
+// 0,1 В, округляем все тики до кратных 0,1 В.
+//=================================================================
 function rebuildChart() {
   const to   = chartToMs || ceilToHour(Date.now());
   const from = to - rangeMs();
@@ -2320,6 +2504,41 @@ function rebuildChart() {
     .filter(ev => enabledCats.includes(ev.cat) && ev.t >= from && ev.t <= to)
     .sort((a, b) => a.t - b.t);
 
+  // R10.9: расчёт границ оси Y для напряжения.
+  // Округляем min вниз и max вверх до 0.1 В, чтобы шаг
+  // между тиками всегда был кратен 0.1 В.
+  let yAxisMin = 0;
+  let yAxisMax = 0;
+  {
+    const vals = [];
+    if (document.getElementById('chk_batt').checked) {
+      for (const v of dataBatt) if (isFinite(v)) vals.push(v);
+    }
+    if (document.getElementById('chk_inp').checked) {
+      for (const v of dataInp) if (isFinite(v)) vals.push(v);
+    }
+    if (vals.length > 0) {
+      let vMin = Math.min.apply(null, vals);
+      let vMax = Math.max.apply(null, vals);
+      // минимальная ширина окна — 0.5 В, чтобы график не «прыгал»
+      if (vMax - vMin < 0.5) {
+        const mid = (vMin + vMax) / 2;
+        vMin = mid - 0.25;
+        vMax = mid + 0.25;
+      } else {
+        // добавляем поля по 5%
+        const pad = (vMax - vMin) * 0.05;
+        vMin -= pad;
+        vMax += pad;
+      }
+      // округляем до 0.1
+      yAxisMin = Math.floor(vMin * 10) / 10;
+      yAxisMax = Math.ceil (vMax * 10) / 10;
+      // не даём оси уйти ниже 0
+      if (yAxisMin < 0) yAxisMin = 0;
+    }
+  }
+
   const cfg = {
     type:'line',
     data:{ labels, datasets },
@@ -2331,7 +2550,10 @@ function rebuildChart() {
       scales:{
         y:{ type:'linear', position:'left',
             title:{ display:true, text:'Voltage, V', color:'#ccc' },
-            ticks:{ color:'#aaa' }, grid:{ color:'#2a2a2a' } },
+            min: yAxisMin,
+            max: yAxisMax,
+            ticks:{ color:'#aaa', stepSize: 0.1, autoSkip: true },
+            grid:{ color:'#2a2a2a' } },
         y1:{ type:'linear', position:'right',
             title:{ display:true, text:'Temp., °C', color:'#ccc' },
             ticks:{ color:'#aaa' }, grid:{ drawOnChartArea:false } },
@@ -2406,13 +2628,14 @@ const PANE_FIELDS = {
   net:  ['wifiSsid','wifiPass','hostname','useDhcp','ip','mask','gw','dns',
          'ntpServer1','ntpServer2','ntpTz','tempHighC',
          'battFullV','battEmptyV','battWarnV','battCapacityWh','loadCurrentA',
-         'inputLostV','hystV','adcPollMs'],
+         'inputLostV'],
   snmp: ['qnapIp','qnapMac','snmpCommunity','snmpPort','useInform','enterpriseOid'],
   cal:  ['battOffsetMv','battGain','inputOffsetMv','inputGain'],
   wol:  ['wolEnable','wolOutageMinSec','wolStableSec','wolBattMinPct'],
   tg:   ['tgToken','tgChatId','tgEnable','tgPeriod','tgEvents'],
   em:   ['emSmtpHost','emSmtpPort','emUser','emPass','emFrom','emTo',
-         'emEnable','emPeriod','emEvents']
+         'emEnable','emPeriod','emEvents'],
+  ota:  ['otaUser','otaPass']
 };
 
 function collectAllFields() {
@@ -2562,6 +2785,7 @@ function paneName(pane) {
     case 'wol':  return tr('paneWol');
     case 'tg':   return tr('paneTg');
     case 'em':   return tr('paneEm');
+    case 'ota':  return tr('paneOta');
     default:     return pane;
   }
 }
@@ -2708,6 +2932,7 @@ async function clearLog() {
 // ИНИЦИАЛИЗАЦИЯ
 //=================================================================
 (function() {
+  installFieldIcons();
   initNtpTimeSelects();
   initChartWindow();
   renderRangeRow();
@@ -2723,6 +2948,7 @@ async function clearLog() {
 </body>
 </html>
 )HTMLDOC";
+
 //=================================================================
 // HTTP-ОБРАБОТЧИКИ
 //=================================================================
@@ -2797,7 +3023,7 @@ static void handleApiStatus() {
 
 static void handleApiConfigGet() {
     String j;
-    j.reserve(2400);
+    j.reserve(2600);
     j  = "{";
     j += "\"wifiSsid\":\"" + s_cfg.wifiSsid + "\",";
     j += "\"wifiPass\":\"" + s_cfg.wifiPass + "\",";
@@ -2852,7 +3078,9 @@ static void handleApiConfigGet() {
     j += "\"emPeriod\":" + String((unsigned)s_cfg.emPeriod) + ",";
     j += "\"emEvents\":" + String((unsigned)s_cfg.emEvents) + ",";
     j += "\"uiLang\":\"" + s_cfg.uiLang + "\",";
-    j += "\"uiEventMask\":" + String((unsigned)s_cfg.uiEventMask);
+    j += "\"uiEventMask\":" + String((unsigned)s_cfg.uiEventMask) + ",";
+    j += "\"otaUser\":\"" + s_cfg.otaUser + "\",";
+    j += "\"otaPass\":\"" + s_cfg.otaPass + "\"";
     j += "}";
     s_server.send(200, "application/json", j);
 }
@@ -2933,8 +3161,6 @@ static void handleApiConfigPost() {
     if (jsonGetFloat (body, "battCapacityWh", f)) s_cfg.battCapacityWh = f;
     if (jsonGetFloat (body, "loadCurrentA", f))   s_cfg.loadCurrentA = f;
     if (jsonGetFloat (body, "inputLostV", f))     s_cfg.inputLostV = f;
-    if (jsonGetFloat (body, "hystV", f))          s_cfg.hystV = f;
-    if (jsonGetInt   (body, "adcPollMs", i))      s_cfg.adcPollMs = (uint16_t)i;
     s_cfg.informPeriodSec = 30;
 
     if (jsonGetFloat (body, "battOffsetMv", f))   s_cfg.battOffsetMv = f;
@@ -2966,14 +3192,21 @@ static void handleApiConfigPost() {
     if (jsonGetString(body, "uiLang", s))         s_cfg.uiLang = s;
     if (jsonGetInt   (body, "uiEventMask", i))    s_cfg.uiEventMask = (uint16_t)i;
 
+    if (jsonGetString(body, "otaUser", s)) {
+        if (s.length() > 0) s_cfg.otaUser = s;
+    }
+    if (jsonGetString(body, "otaPass", s)) {
+        if (s.length() > 0) s_cfg.otaPass = s;
+    }
+
     storageSave(s_cfg);
     telegramSetConfig(s_cfg);
     emailSetConfig(s_cfg);
     ntpSetConfig(s_cfg);
+    ElegantOTA.setAuth(s_cfg.otaUser.c_str(), s_cfg.otaPass.c_str());
     s_server.send(200, "application/json", "{\"ok\":true}");
 }
 
-// R10.5: применяем язык в TG/EM без перезагрузки.
 static void handleApiUiConfig() {
     if (!s_server.hasArg("plain")) { s_server.send(400, "no body"); return; }
     String body = s_server.arg("plain");
@@ -3052,6 +3285,10 @@ static void handleApiConfigResetPane() {
         s_cfg.emEnable   = def.emEnable;
         s_cfg.emPeriod   = def.emPeriod;
         s_cfg.emEvents   = def.emEvents;
+    } else if (pane == "ota") {
+        s_cfg.otaUser = def.otaUser;
+        s_cfg.otaPass = def.otaPass;
+        ElegantOTA.setAuth(s_cfg.otaUser.c_str(), s_cfg.otaPass.c_str());
     } else {
         s_server.send(400, "bad pane"); return;
     }
@@ -3254,8 +3491,9 @@ void webInit(const Config &cfg) {
     s_server.onNotFound(handleNotFound);
 
     ElegantOTA.begin(&s_server);
-    ElegantOTA.setAuth(OTA_USERNAME, OTA_PASSWORD);
-    DbgInfo("OTA: ElegantOTA ready at %s", OTA_PATH);
+    ElegantOTA.setAuth(s_cfg.otaUser.c_str(), s_cfg.otaPass.c_str());
+    DbgInfo("OTA: ElegantOTA ready at %s (user=%s)",
+            OTA_PATH, s_cfg.otaUser.c_str());
 
     s_server.begin();
 
