@@ -1,14 +1,17 @@
 //==============================================================
 // SNMP_FOR_DC_UPS
-// Release : R09.6
+// Release : R10.9
 // File    : storage.cpp
 //==============================================================
-// R06.1: informPeriodSec принудительно = 30 при загрузке.
-// R07.0: добавлены поля Email (SMTP) в load/save/dump/defaults.
-// R07.7: удалено неиспользуемое поле logMaxBytes.
-// R09.0: добавлены поля uiLang и uiEventMask.
-// R09.6: ntpUse удалён, добавлены ntpSyncHour и ntpSyncMin.
-//        Старое значение "ntpUse" из NVS игнорируется.
+// Реализация загрузки/сохранения Config в NVS.
+//
+// История:
+//   R06.1: informPeriodSec = 30 при загрузке.
+//   R07.0: Email-поля в load/save/dump/defaults.
+//   R07.7: удалено logMaxBytes.
+//   R09.0: uiLang, uiEventMask.
+//   R09.6: ntpUse удалён; ntpSyncHour, ntpSyncMin.
+//   R10.9: otaUser, otaPass — в NVS. Дефолты из config.h.
 //==============================================================
 
 #include "storage.h"
@@ -32,7 +35,6 @@ void storageFillDefaults(Config &cfg) {
     cfg.gw                = NET_GW_DEFAULT;
     cfg.dns               = NET_DNS_DEFAULT;
 
-    // R09.6: ntpUse удалён — NTP всегда включён.
     cfg.ntpServer1        = NTP_SERVER1_DEFAULT;
     cfg.ntpServer2        = NTP_SERVER2_DEFAULT;
     cfg.ntpTz             = NTP_TZ_DEFAULT;
@@ -90,6 +92,10 @@ void storageFillDefaults(Config &cfg) {
 
     cfg.uiLang            = "ru";
     cfg.uiEventMask       = 0x00FF;
+
+    // R10.9
+    cfg.otaUser           = OTA_USERNAME_DEFAULT;
+    cfg.otaPass           = OTA_PASSWORD_DEFAULT;
 }
 
 //--------------------------------------------------------------
@@ -110,7 +116,6 @@ void storageLoad(Config &cfg) {
     cfg.gw            = prefs.getString("gw",       cfg.gw);
     cfg.dns           = prefs.getString("dns",      cfg.dns);
 
-    // R09.6: "ntpUse" больше не читаем — NTP всегда включён.
     cfg.ntpServer1    = prefs.getString("ntpSrv1",  cfg.ntpServer1);
     cfg.ntpServer2    = prefs.getString("ntpSrv2",  cfg.ntpServer2);
     cfg.ntpTz         = prefs.getString("ntpTz",    cfg.ntpTz);
@@ -168,11 +173,14 @@ void storageLoad(Config &cfg) {
     cfg.uiLang        = prefs.getString("uiLang",   cfg.uiLang);
     cfg.uiEventMask   = prefs.getUShort("uiEvMask", cfg.uiEventMask);
 
+    // R10.9: OTA
+    cfg.otaUser       = prefs.getString("otaUser",  cfg.otaUser);
+    cfg.otaPass       = prefs.getString("otaPass",  cfg.otaPass);
+
     prefs.end();
 
     cfg.informPeriodSec = 30;
 
-    // R09.6: защита от некорректных значений в NVS
     if (cfg.ntpSyncHour > 23) cfg.ntpSyncHour = NTP_SYNC_HOUR_DEFAULT;
     if (cfg.ntpSyncMin  > 59) cfg.ntpSyncMin  = NTP_SYNC_MIN_DEFAULT;
 
@@ -195,7 +203,6 @@ void storageSave(const Config &cfg) {
     prefs.putString("gw",       cfg.gw);
     prefs.putString("dns",      cfg.dns);
 
-    // R09.6: "ntpUse" не сохраняем (устаревшее поле).
     prefs.putString("ntpSrv1",  cfg.ntpServer1);
     prefs.putString("ntpSrv2",  cfg.ntpServer2);
     prefs.putString("ntpTz",    cfg.ntpTz);
@@ -253,6 +260,10 @@ void storageSave(const Config &cfg) {
 
     prefs.putString("uiLang",   cfg.uiLang);
     prefs.putUShort("uiEvMask", cfg.uiEventMask);
+
+    // R10.9: OTA
+    prefs.putString("otaUser",  cfg.otaUser);
+    prefs.putString("otaPass",  cfg.otaPass);
 
     prefs.end();
 
@@ -327,5 +338,8 @@ void storageDump(const Config &cfg) {
     DbgInfo("EM events mask : 0x%04X", (unsigned)cfg.emEvents);
     DbgInfo("UI lang        : %s", cfg.uiLang.c_str());
     DbgInfo("UI event mask  : 0x%04X", (unsigned)cfg.uiEventMask);
+    // R10.9: OTA — не выводим пароль, только длину
+    DbgInfo("OTA user       : %s", cfg.otaUser.c_str());
+    DbgInfo("OTA pass len   : %u", (unsigned)cfg.otaPass.length());
     DbgInfo("---------------------");
 }
