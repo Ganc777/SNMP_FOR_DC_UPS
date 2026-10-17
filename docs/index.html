@@ -1,0 +1,2548 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SNMP_FOR_DC_UPS — Demo Dashboard</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230066cc'/%3E%3Cpath d='M18 4 L8 18 L14 18 L12 28 L24 12 L17 12 L20 4 Z' fill='%23ffffff'/%3E%3C/svg%3E">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root{--bg:#111;--fg:#eee;--accent:#4ea1ff;--ok:#3ecb6e;
+        --warn:#e8b53c;--err:#e84c3c;--dim:#888;--card:#1b1b1b;
+        --bord:#2a2a2a;}
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:system-ui,Segoe UI,Arial,sans-serif;
+       background:var(--bg);color:var(--fg);padding:16px;}
+  .topbar{display:flex;align-items:center;justify-content:space-between;
+          gap:10px;margin-bottom:6px;}
+  h1{font-size:20px;line-height:1.2;margin:0;}
+  .demo-badge {
+    background:#4ea1ff;color:#000;font-size:11px;font-weight:700;
+    padding:2px 8px;border-radius:10px;margin-left:8px;
+    text-transform:uppercase;letter-spacing:0.5px;
+    vertical-align:middle;
+  }
+  .langbtn{background:transparent;color:var(--fg);
+    border:1px solid var(--bord);border-radius:5px;
+    padding:3px 9px;font-size:13px;line-height:1.1;
+    font-weight:600;cursor:pointer;font-family:inherit;
+    white-space:nowrap;flex:0 0 auto;
+    display:inline-flex;align-items:center;gap:6px;
+    min-width:70px;min-height:22px;}
+  .langbtn:hover{border-color:var(--accent);color:var(--accent);}
+  .langbtn svg{display:block;}
+  .langbtn #langFlag{display:inline-flex;align-items:center;
+                     justify-content:center;width:18px;height:12px;}
+  h2{font-size:16px;margin:24px 0 8px 0;color:var(--accent);}
+  .sub{color:var(--dim);font-size:13px;margin-bottom:16px;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+        gap:12px;margin-bottom:20px;}
+  .card{background:var(--card);border:1px solid var(--bord);
+        border-radius:10px;padding:14px;}
+  .label{color:var(--dim);font-size:12px;margin-bottom:2px;
+    display:inline-flex;align-items:center;gap:6px;}
+  .value{font-size:22px;font-weight:600;}
+  .unit{color:var(--dim);font-size:14px;font-weight:400;}
+  .state-NORMAL{color:var(--ok);}
+  .state-INPUT_LOST{color:var(--warn);}
+  .state-LOW_BATT{color:var(--warn);}
+  .state-CRITICAL{color:var(--err);}
+  .bar{height:10px;background:#2a2a2a;border-radius:5px;overflow:hidden;}
+  .bar>div{height:100%;background:var(--accent);transition:width .3s;}
+
+  .statustables{display:grid;grid-template-columns:1fr 1fr;gap:16px;
+                margin-top:12px;}
+  .statustables table{margin-top:0;}
+  @media(max-width:600px){.statustables{grid-template-columns:1fr;}}
+
+  table{width:100%;border-collapse:collapse;margin-top:12px;font-size:14px;}
+  td{padding:6px 8px;border-bottom:1px solid var(--bord);vertical-align:middle;}
+  td:first-child{color:var(--dim);width:auto;padding-right:24px;
+    white-space:nowrap;}
+  td:last-child{text-align:left;}
+  input,select{background:#0a0a0a;color:var(--fg);border:1px solid var(--bord);
+    border-radius:6px;padding:6px 8px;font-size:14px;width:100%;
+    font-family:inherit;}
+  input:focus,select:focus{outline:none;border-color:var(--accent);}
+  button{background:var(--accent);color:#000;border:1px solid var(--accent);
+    border-radius:6px;
+    padding:8px 16px;font-size:14px;font-weight:600;cursor:pointer;
+    font-family:inherit;}
+  button:hover{filter:brightness(1.1);}
+  button.danger{background:var(--err);color:#fff;border-color:var(--err);}
+  button.ghost{background:transparent;color:var(--accent);
+    border:1px solid var(--accent);}
+  button.ok{background:var(--ok);color:#000;border-color:var(--ok);}
+  button:disabled{opacity:0.45;cursor:not-allowed;}
+  .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;}
+
+  .tabs{display:flex;gap:4px;margin-bottom:12px;flex-wrap:wrap;}
+  .tabs button{background:transparent;color:var(--dim);
+    border:1px solid var(--accent);font-weight:400;}
+  .tabs button:hover{border-color:var(--accent);color:var(--accent);}
+  .tabs button.active{background:var(--accent);color:#000;font-weight:600;
+    border-color:var(--accent);}
+
+  .tab-pane{display:none;}
+  .tab-pane.active{display:block;}
+  .pane-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px;
+    padding-top:16px;border-top:1px solid var(--bord);}
+  pre.log{background:#0a0a0a;border:1px solid var(--bord);border-radius:6px;
+    padding:12px;max-height:400px;overflow:auto;font-size:12px;
+    white-space:pre-wrap;word-break:break-all;color:#ccc;}
+  .footer{color:var(--dim);font-size:12px;margin-top:24px;}
+  .msg{padding:8px 12px;border-radius:6px;margin:8px 0;display:none;}
+  .msg.ok{background:#1e4620;color:#b8f5c0;display:block;}
+  .msg.err{background:#4a1e1e;color:#f5b8b8;display:block;}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+  .row3 .field{margin-bottom:8px;}
+  .field{margin-bottom:8px;}
+  .field .label{margin-bottom:2px;}
+  .ota-link{display:inline-block;background:var(--ok);color:#000;
+    padding:10px 18px;border-radius:6px;font-weight:600;
+    text-decoration:none;font-size:14px;margin-top:8px;}
+  .ota-link:hover{filter:brightness(1.1);}
+  .info{background:#0e2a44;border:1px solid #1b4a7a;border-radius:6px;
+    padding:10px 14px;color:#cde;font-size:13px;margin:12px 0;}
+  .dupe{color:#8cf;font-size:11px;margin-top:2px;}
+  .calhead{background:#141414;border:1px solid var(--bord);border-radius:6px;
+    padding:8px 12px;font-size:13px;color:#ccc;margin:8px 0 14px 0;}
+  .clockbar{background:#0e2a44;border:1px solid #1b4a7a;border-radius:6px;
+    padding:10px 14px;font-size:13px;color:#cde;margin-bottom:14px;
+    display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;}
+  .clockbar b{color:#fff;}
+  .chartbox{background:#1b1b1b;border:1px solid var(--bord);border-radius:10px;
+    padding:14px;margin-top:12px;position:relative;}
+  .chartbox canvas{max-height:420px;display:block;}
+
+  .loadmask{position:absolute;left:0;top:0;right:0;bottom:0;
+    background:rgba(15,15,15,0.75);display:none;align-items:center;
+    justify-content:center;color:#fff;font-size:15px;font-weight:600;
+    border-radius:10px;z-index:5;}
+  .loadmask.show{display:flex;}
+  .loadmask .blink{animation:blink 1s infinite;}
+  @keyframes blink{0%,50%{opacity:1;}51%,100%{opacity:0.2;}}
+
+  .rangebtns{display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+    margin-bottom:4px;}
+  .rangebtns button{background:transparent;color:var(--dim);
+    border:1px solid var(--accent);font-weight:400;
+    padding:8px 14px;font-size:14px;border-radius:6px;cursor:pointer;
+    font-family:inherit;}
+  .rangebtns button:hover{filter:brightness(1.1);}
+  .rangebtns button.active{background:var(--accent);color:#000;font-weight:600;
+    border-color:var(--accent);}
+  .rangebtns .navbtn{background:transparent;color:var(--accent);
+    border:1px solid var(--bord);font-weight:600;
+    padding:6px 12px;font-size:15px;border-radius:6px;cursor:pointer;
+    font-family:inherit;min-width:38px;}
+  .rangebtns .navbtn:hover{border-color:var(--accent);}
+  .rangebtns .navbtn:disabled{opacity:0.4;cursor:not-allowed;
+    border-color:var(--bord);color:var(--dim);}
+  .rangelabel{color:var(--dim);font-size:12px;margin-top:6px;
+    font-family:monospace;letter-spacing:0.3px;}
+
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;margin-top:10px;}
+  .legend label{display:flex;align-items:center;gap:6px;cursor:pointer;}
+  .legend input{width:auto;}
+  .legend .swatch{display:inline-block;width:12px;height:12px;border-radius:2px;
+    vertical-align:middle;}
+  .evtcats{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;margin-top:14px;
+    padding:12px;background:#141414;border:1px solid var(--bord);
+    border-radius:8px;}
+  .evtcats .title{color:var(--dim);margin-right:6px;}
+  .evtcats label{display:flex;align-items:center;gap:6px;cursor:pointer;}
+  .evtcats input{width:auto;}
+  .evtcats svg{display:block;}
+  .logcfg{background:#141414;border:1px solid var(--bord);border-radius:8px;
+    padding:12px;margin-bottom:14px;}
+  .logcfg .info2{color:#8cf;font-size:12px;line-height:1.7;margin-bottom:14px;}
+  .logcfg .info2 b{color:#fff;}
+  .logcfg .info2 .sep{color:#456;margin:0 8px;}
+  .logcfg .fillval{color:#fff;font-weight:600;}
+  .tgcats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+    gap:10px;margin-top:10px;}
+  .tgcats label{display:flex;align-items:center;gap:8px;cursor:pointer;
+    background:#141414;border:1px solid var(--bord);border-radius:6px;
+    padding:8px 12px;font-size:14px;}
+  .tgcats input{width:auto;}
+  @media(max-width:700px){.row3{grid-template-columns:1fr;}}
+  @media(max-width:600px){.row2{grid-template-columns:1fr;}}
+
+  .evt-tip{position:fixed;background:rgba(0,0,0,0.92);color:#fff;
+    border:1px solid var(--accent);border-radius:6px;padding:6px 10px;
+    font-size:12px;line-height:1.3;pointer-events:none;z-index:1000;
+    display:none;white-space:nowrap;box-shadow:0 2px 10px rgba(0,0,0,0.6);}
+  .evt-tip b{color:var(--accent);}
+
+  .ntp-time{display:grid;grid-template-columns:90px 90px;gap:6px;
+    align-items:center;}
+
+  .fi {
+    display:inline-block;
+    vertical-align:middle;
+    width:14px;height:14px;
+    margin-left:5px;
+    cursor:help;
+    opacity:0.75;
+    transition:opacity .15s;
+  }
+  .fi:hover { opacity:1.0; }
+
+  #tipField {
+    position:fixed;
+    background:rgba(10,15,25,0.97);
+    color:#e8f4ff;
+    border:1px solid var(--accent);
+    border-radius:6px;
+    padding:8px 12px;
+    font-size:12px;
+    line-height:1.5;
+    max-width:340px;
+    pointer-events:none;
+    z-index:2000;
+    display:none;
+    box-shadow:0 4px 18px rgba(0,0,0,0.8);
+    white-space:normal;
+  }
+  #tipField b { color:#7cb8ff; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <h1>SNMP_FOR_DC_UPS<span class="demo-badge">DEMO</span></h1>
+  <button class="langbtn" id="langBtn" onclick="toggleLang()"><span id="langFlag"></span><span id="langCode">RU</span></button>
+</div>
+<div class="sub">DC UPS Monitor for QNAP &middot; <span id="host">demo.local</span>
+  &middot; <span id="fwver">R10.9-demo</span></div>
+
+<div class="clockbar">
+  <span><span data-i18n="curTime">Текущее время</span>: <b id="clk_main">—</b></span>
+  <span><span data-i18n="updTime">Обновлено</span>: <b id="clk_upd">—</b></span>
+  <span>NTP: <b id="clk_ntp">—</b></span>
+</div>
+
+<div class="grid">
+  <div class="card"><div class="label" data-i18n="state">Состояние</div>
+    <div class="value" id="state">—</div></div>
+  <div class="card"><div class="label" data-i18n="battery">Аккумулятор</div>
+    <div class="value"><span id="battV">—</span> <span class="unit" data-i18n="voltUnit">В</span></div>
+    <div class="bar" style="margin-top:8px"><div id="battBar" style="width:0%"></div></div>
+    <div class="sub" style="margin-top:6px"><span id="battPct">—</span> %</div>
+  </div>
+  <div class="card"><div class="label" data-i18n="input12">Вход 12 В</div>
+    <div class="value"><span id="inpV">—</span> <span class="unit" data-i18n="voltUnit">В</span></div>
+    <div class="sub" style="margin-top:6px" id="inpSt">—</div>
+  </div>
+  <div class="card"><div class="label" data-i18n="runtime">Runtime (прогноз)</div>
+    <div class="value" id="runtime">—</div></div>
+</div>
+
+<div class="statustables">
+  <table>
+    <tr><td data-i18n="ipWifi">IP / Wi-Fi</td><td id="net">—</td></tr>
+    <tr><td>RSSI</td><td id="rssi">—</td></tr>
+    <tr><td data-i18n="cpuTemp">Температура CPU</td><td id="cpu_temp">—</td></tr>
+    <tr><td data-i18n="lastUpd">Последнее обновление</td><td id="updline">—</td></tr>
+  </table>
+  <table>
+    <tr><td data-i18n="uptime">Uptime</td><td id="uptime">—</td></tr>
+    <tr><td data-i18n="heapFree">Heap free</td><td id="heap_free">—</td></tr>
+    <tr><td data-i18n="wolStatus">Статус WoL</td><td id="wolst">—</td></tr>
+    <tr><td data-i18n="tgStatus">Статус Telegram</td><td id="tgst">—</td></tr>
+    <tr><td data-i18n="emStatus">Статус Email</td><td id="emst">—</td></tr>
+  </table>
+</div>
+
+<div id="msg" class="msg"></div>
+
+<h2 data-i18n="settings">Настройки</h2>
+<div class="tabs">
+  <button data-tab="net" class="active" data-i18n="tabNet">Системные настройки</button>
+  <button data-tab="snmp">SNMP</button>
+  <button data-tab="cal" data-i18n="tabCal">Калибровка</button>
+  <button data-tab="wol" data-i18n="tabWol">Автозапуск</button>
+  <button data-tab="tg" data-i18n="tabTg">Telegram</button>
+  <button data-tab="em" data-i18n="tabEm">Email</button>
+  <button data-tab="chart" data-i18n="tabChart">Графики</button>
+  <button data-tab="log" data-i18n="tabLog">Логи</button>
+  <button data-tab="ota" data-i18n="tabOta">Обновление</button>
+</div>
+
+<div class="tab-pane active" id="tab-net">
+  <div class="row3">
+    <div>
+      <div class="field"><div class="label"><span data-i18n="lblSsid">SSID</span><span class="fi" data-tip="tipSsid"></span></div>
+        <input id="c_wifiSsid"></div>
+      <div class="field"><div class="label"><span data-i18n="lblPassword">Пароль</span><span class="fi" data-tip="tipWifiPass"></span></div>
+        <input id="c_wifiPass" type="password"></div>
+      <div class="field"><div class="label"><span>Hostname</span><span class="fi" data-tip="tipHostname"></span></div>
+        <input id="c_hostname"></div>
+      <div class="field"><div class="label"><span data-i18n="lblIpMode">Режим IP</span><span class="fi" data-tip="tipIpMode"></span></div>
+        <select id="c_useDhcp">
+          <option value="0" data-i18n="static">Статический</option>
+          <option value="1">DHCP</option>
+        </select>
+      </div>
+      <div class="field"><div class="label"><span>IP</span><span class="fi" data-tip="tipIp"></span></div>
+        <input id="c_ip"></div>
+      <div class="field"><div class="label"><span data-i18n="lblNetmask">Маска</span><span class="fi" data-tip="tipMask"></span></div>
+        <input id="c_mask"></div>
+    </div>
+    <div>
+      <div class="field"><div class="label"><span data-i18n="lblGateway">Шлюз</span><span class="fi" data-tip="tipGw"></span></div>
+        <input id="c_gw"></div>
+      <div class="field"><div class="label"><span>DNS</span><span class="fi" data-tip="tipDns"></span></div>
+        <input id="c_dns"></div>
+      <div class="field"><div class="label"><span data-i18n="lblNtpSrv1">NTP-сервер 1</span><span class="fi" data-tip="tipNtpSrv1"></span></div>
+        <input id="c_ntpServer1"></div>
+      <div class="field"><div class="label"><span data-i18n="lblNtpSrv2">NTP-сервер 2</span><span class="fi" data-tip="tipNtpSrv2"></span></div>
+        <input id="c_ntpServer2"></div>
+      <div class="field"><div class="label"><span data-i18n="lblTimezone">Часовой пояс</span><span class="fi" data-tip="tipTz"></span></div>
+        <select id="c_ntpTz">
+          <option value="UTC0" data-tz="tzUTC">UTC (UTC+0)</option>
+          <option value="MSK-3" data-tz="tzMSK">Москва (UTC+3)</option>
+          <option value="EET-2" data-tz="tzEET">Калининград / Хельсинки (UTC+2)</option>
+          <option value="EET-2EEST,M3.5.0/3,M10.5.0/4" data-tz="tzKIEV">Киев / Кишинёв (UTC+2/+3, DST)</option>
+          <option value="+04-4" data-tz="tzSAMARA">Самара / Баку (UTC+4)</option>
+          <option value="YEKT-5" data-tz="tzYEKT">Екатеринбург (UTC+5)</option>
+          <option value="OMST-6" data-tz="tzOMSK">Омск (UTC+6)</option>
+          <option value="KRAT-7" data-tz="tzKRAS">Красноярск / Новосибирск (UTC+7)</option>
+          <option value="IRKT-8" data-tz="tzIRK">Иркутск / Улан-Удэ (UTC+8)</option>
+          <option value="YAKT-9" data-tz="tzYAK">Якутск / Чита (UTC+9)</option>
+          <option value="VLAT-10" data-tz="tzVLA">Владивосток (UTC+10)</option>
+          <option value="MAGT-11" data-tz="tzMAG">Магадан (UTC+11)</option>
+          <option value="PETT-12" data-tz="tzPET">Камчатка (UTC+12)</option>
+          <option value="+05-5" data-tz="tzTASH">Ташкент / Астана (UTC+5)</option>
+          <option value="+03-3" data-tz="tzIST">Стамбул / Багдад (UTC+3)</option>
+          <option value="CET-1CEST,M3.5.0,M10.5.0/3" data-tz="tzCET">Берлин / Париж (UTC+1/+2, DST)</option>
+          <option value="GMT0BST,M3.5.0/1,M10.5.0" data-tz="tzGMT">Лондон (UTC+0/+1, DST)</option>
+          <option value="EST5EDT,M3.2.0,M11.1.0" data-tz="tzEST">Нью-Йорк (UTC−5/−4, DST)</option>
+          <option value="PST8PDT,M3.2.0,M11.1.0" data-tz="tzPST">Лос-Анджелес (UTC−8/−7, DST)</option>
+          <option value="JST-9" data-tz="tzTOK">Токио (UTC+9)</option>
+          <option value="CST-8" data-tz="tzCHN">Пекин / Шанхай (UTC+8)</option>
+          <option value="IST-5:30" data-tz="tzDEL">Дели (UTC+5:30)</option>
+          <option value="AEST-10AEDT,M10.1.0,M4.1.0/3" data-tz="tzSYD">Сидней (UTC+10/+11, DST)</option>
+        </select>
+      </div>
+      <div class="field">
+        <div class="label"><span data-i18n="lblNtpSyncTime">Начало окна синхронизации NTP</span><span class="fi" data-tip="tipNtpSync"></span></div>
+        <div class="ntp-time">
+          <select id="c_ntpSyncHour"></select>
+          <select id="c_ntpSyncMin"></select>
+        </div>
+      </div>
+      <div class="field"><div class="label"><span data-i18n="lblTempHighC">Порог температуры, °C</span><span class="fi" data-tip="tipTempHigh"></span></div>
+        <input id="c_tempHighC" type="number" step="0.1"></div>
+    </div>
+    <div>
+      <div class="field"><div class="label"><span data-i18n="lblBattFullV">Батарея полная, В</span><span class="fi" data-tip="tipBattFull"></span></div>
+        <input id="c_battFullV" type="number" step="0.01"></div>
+      <div class="field"><div class="label"><span data-i18n="lblBattWarnV">Предупреждение, В</span><span class="fi" data-tip="tipBattWarn"></span></div>
+        <input id="c_battWarnV" type="number" step="0.01"></div>
+      <div class="field"><div class="label"><span data-i18n="lblBattEmptyV">Батарея пустая, В</span><span class="fi" data-tip="tipBattEmpty"></span></div>
+        <input id="c_battEmptyV" type="number" step="0.01"></div>
+      <div class="field"><div class="label"><span data-i18n="lblBattCapacityWh">Ёмкость, Вт·ч</span><span class="fi" data-tip="tipBattCapacity"></span></div>
+        <input id="c_battCapacityWh" type="number" step="0.01"></div>
+      <div class="field"><div class="label"><span data-i18n="lblInputLostV">Пропадание входа, В</span><span class="fi" data-tip="tipInputLost"></span></div>
+        <input id="c_inputLostV" type="number" step="0.01"></div>
+      <div class="field"><div class="label"><span data-i18n="lblLoadCurrentA">Ток нагрузки, А</span><span class="fi" data-tip="tipLoadCurrent"></span></div>
+        <input id="c_loadCurrentA" type="number" step="0.01"></div>
+    </div>
+  </div>
+
+  <div class="pane-actions">
+    <button onclick="saveAllPanes()" data-i18n="saveChanges">Сохранить изменения</button>
+    <button class="danger" onclick="resetPane('net')" data-i18n="resetChanges">Сбросить изменения</button>
+    <button class="ok" onclick="ntpSyncNow()" data-i18n="syncTime">Синхронизировать время</button>
+  </div>
+</div>
+
+<div class="tab-pane" id="tab-snmp">
+  <div class="row2">
+    <div><div class="label"><span data-i18n="lblQnapIp">IP QNAP (адрес NAS-сервера)</span><span class="fi" data-tip="tipQnapIp"></span></div>
+      <input id="c_qnapIp"></div>
+    <div><div class="label"><span data-i18n="lblQnapMac">MAC-адрес QNAP (для WoL)</span><span class="fi" data-tip="tipQnapMac"></span></div>
+      <input id="c_qnapMac" placeholder="AA:BB:CC:DD:EE:FF"></div>
+  </div>
+  <div class="row2">
+    <div><div class="label"><span data-i18n="lblCommunity">Community (Группа доступа)</span><span class="fi" data-tip="tipCommunity"></span></div>
+      <input id="c_snmpCommunity"></div>
+    <div><div class="label"><span data-i18n="lblAgentPort">Порт агента</span><span class="fi" data-tip="tipSnmpPort"></span></div>
+      <input id="c_snmpPort" type="number"></div>
+  </div>
+  <div class="row2">
+    <div><div class="label"><span data-i18n="lblInformType">Тип уведомлений</span><span class="fi" data-tip="tipInformType"></span></div>
+      <select id="c_useInform">
+        <option value="1">INFORM</option>
+        <option value="0">TRAP</option>
+      </select>
+    </div>
+    <div><div class="label"><span data-i18n="lblEnterpriseOid">OID производителя</span><span class="fi" data-tip="tipEntOid"></span></div>
+      <input id="c_enterpriseOid"></div>
+  </div>
+  <div class="pane-actions">
+    <button onclick="saveAllPanes()" data-i18n="saveChanges">Сохранить изменения</button>
+    <button class="danger" onclick="resetPane('snmp')" data-i18n="resetChanges">Сбросить изменения</button>
+  </div>
+</div>
+
+<div class="tab-pane" id="tab-cal">
+  <div class="row2">
+    <div>
+      <h2 data-i18n="battery">Аккумулятор</h2>
+      <div class="info" data-i18n="calHint">Введи реальное напряжение, измеренное мультиметром. Коэффициент gain рассчитается автоматически.</div>
+      <div class="calhead">
+        <span data-i18n="now">Сейчас</span>: off=<span id="cal_batt_off_show">—</span> mV,
+        gain=<span id="cal_batt_gain_show">—</span>,
+        <span data-i18n="reading">показание</span>=<span id="cal_batt_v">—</span> <span data-i18n="voltUnit">В</span>
+      </div>
+      <div><div class="label"><span data-i18n="lblRealVoltage">Реальное напряжение, В</span><span class="fi" data-tip="tipCalRealBatt"></span></div>
+        <input id="cal_batt_real" type="number" step="0.001"></div>
+      <div class="actions">
+        <button onclick="applyCal('batt')" data-i18n="calcGain">Рассчитать gain</button>
+        <button class="ghost" onclick="resetCal('batt')" data-i18n="reset">Сброс</button>
+      </div>
+    </div>
+    <div>
+      <h2 data-i18n="input12">Вход 12 В</h2>
+      <div class="info" data-i18n="calHint">Введи реальное напряжение, измеренное мультиметром. Коэффициент gain рассчитается автоматически.</div>
+      <div class="calhead">
+        <span data-i18n="now">Сейчас</span>: off=<span id="cal_input_off_show">—</span> mV,
+        gain=<span id="cal_input_gain_show">—</span>,
+        <span data-i18n="reading">показание</span>=<span id="cal_input_v">—</span> <span data-i18n="voltUnit">В</span>
+      </div>
+      <div><div class="label"><span data-i18n="lblRealVoltage">Реальное напряжение, В</span><span class="fi" data-tip="tipCalRealInput"></span></div>
+        <input id="cal_input_real" type="number" step="0.001"></div>
+      <div class="actions">
+        <button onclick="applyCal('input')" data-i18n="calcGain">Рассчитать gain</button>
+        <button class="ghost" onclick="resetCal('input')" data-i18n="reset">Сброс</button>
+      </div>
+    </div>
+  </div>
+  <div class="pane-actions">
+    <button onclick="saveAllPanes()" data-i18n="saveChanges">Сохранить изменения</button>
+    <button class="danger" onclick="resetPane('cal')" data-i18n="resetChanges">Сбросить изменения</button>
+  </div>
+</div>
+
+<div class="tab-pane" id="tab-wol">
+  <h2 data-i18n="wolTitle">Автозапуск сервера (Wake-on-LAN)</h2>
+  <div class="info" data-i18n="wolInfo">
+    Пакет WoL отправляется, когда одновременно выполнено:<br>
+    1. Было пропадание входного питания не менее заданного времени.<br>
+    2. После восстановления питание стабильно удерживается.<br>
+    3. Заряд аккумулятора не ниже указанного порога.<br>
+    Пакет отправляется один раз за цикл аварии.
+  </div>
+  <div class="row2">
+    <div><div class="label"><span data-i18n="lblQnapIp">IP QNAP (адрес NAS-сервера)</span><span class="fi" data-tip="tipQnapIp"></span></div>
+      <input id="c2_qnapIp">
+      <div class="dupe" data-i18n="syncSnmpHint">Синхронизируется с вкладкой SNMP</div>
+    </div>
+    <div><div class="label"><span data-i18n="lblQnapMac">MAC-адрес QNAP (для WoL)</span><span class="fi" data-tip="tipQnapMac"></span></div>
+      <input id="c2_qnapMac" placeholder="AA:BB:CC:DD:EE:FF">
+      <div class="dupe" data-i18n="syncSnmpHint">Синхронизируется с вкладкой SNMP</div>
+    </div>
+  </div>
+  <div class="row2">
+    <div><div class="label"><span data-i18n="lblWolEnabled">Автозапуск включён</span><span class="fi" data-tip="tipWolEnable"></span></div>
+      <select id="c_wolEnable">
+        <option value="1" data-i18n="yes">Да</option>
+        <option value="0" data-i18n="no">Нет</option>
+      </select>
+    </div>
+    <div><div class="label"><span data-i18n="lblWolOutage">Пропадание питания более чем, сек</span><span class="fi" data-tip="tipWolOutage"></span></div>
+      <input id="c_wolOutageMinSec" type="number"></div>
+  </div>
+  <div class="row2">
+    <div><div class="label"><span data-i18n="lblWolStable">Есть стабильное питание более чем, сек</span><span class="fi" data-tip="tipWolStable"></span></div>
+      <input id="c_wolStableSec" type="number"></div>
+    <div><div class="label"><span data-i18n="lblWolBattPct">Мин. заряд батареи, %</span><span class="fi" data-tip="tipWolBattPct"></span></div>
+      <input id="c_wolBattMinPct" type="number"></div>
+  </div>
+  <div class="sub">
+    <span data-i18n="curStatus">Текущий статус</span>: <b id="wol_status">—</b>
+  </div>
+  <div class="pane-actions">
+    <button onclick="saveAllPanes()" data-i18n="saveChanges">Сохранить изменения</button>
+    <button class="danger" onclick="resetPane('wol')" data-i18n="resetChanges">Сбросить изменения</button>
+    <button class="ok" onclick="wolManual()" data-i18n="wolSendBtn">Отправить WoL вручную</button>
+  </div>
+</div>
+
+<div class="tab-pane" id="tab-tg">
+  <h2 data-i18n="tgTitle">Уведомления в Telegram</h2>
+  <div class="info" data-i18n="tgInfo">
+    Сообщения отправляются через Telegram Bot API по HTTPS.<br>
+    Токен и Chat ID хранятся в NVS и не попадают в код прошивки.<br>
+    Категории событий фильтруют, какие уведомления отправлять.
+  </div>
+  <div class="row2">
+    <div><div class="label"><span data-i18n="lblTgToken">Bot Token</span><span class="fi" data-tip="tipTgToken"></span></div>
+      <input id="c_tgToken" type="password" placeholder="123456789:AA...">
+      <div class="dupe" data-i18n="tgTokenHint">Получить у @BotFather</div>
+    </div>
+    <div><div class="label"><span data-i18n="lblTgChatId">Chat ID</span><span class="fi" data-tip="tipTgChatId"></span></div>
+      <input id="c_tgChatId" placeholder="123456789">
+      <div class="dupe" data-i18n="tgChatHint">Узнать у @userinfobot</div>
+    </div>
+  </div>
+  <div class="row2">
+    <div><div class="label"><span data-i18n="lblTgEnabled">Отправка включена</span><span class="fi" data-tip="tipTgEnable"></span></div>
+      <select id="c_tgEnable">
+        <option value="1" data-i18n="yes">Да</option>
+        <option value="0" data-i18n="no">Нет</option>
+      </select>
+    </div>
+    <div><div class="label"><span data-i18n="lblTgPeriod">Периодический отчёт</span><span class="fi" data-tip="tipTgPeriod"></span></div>
+      <select id="c_tgPeriod">
+        <option value="0" data-i18n="tgPeriodNone">Нет</option>
+        <option value="1" data-i18n="tgPeriodDay">День</option>
+        <option value="2" data-i18n="tgPeriodWeek">Неделя</option>
+        <option value="3" data-i18n="tgPeriodMonth">Месяц</option>
+      </select>
+    </div>
+  </div>
+
+  <h2 data-i18n="tgEvents">События для отправки</h2>
+  <div class="tgcats">
+    <label><input type="checkbox" id="evt_power"> <span data-i18n="evPower">Питание</span></label>
+    <label><input type="checkbox" id="evt_batt">  <span data-i18n="evBatt">Батарея</span></label>
+    <label><input type="checkbox" id="evt_wol">   <span>WoL</span></label>
+    <label><input type="checkbox" id="evt_boot">  <span data-i18n="evBoot">Перезагрузки</span></label>
+    <label><input type="checkbox" id="evt_wifi">  <span data-i18n="evWifi">Wi-Fi</span></label>
+    <label><input type="checkbox" id="evt_snmp">  <span>SNMP</span></label>
+    <label><input type="checkbox" id="evt_ntp">   <span>NTP</span></label>
+    <label><input type="checkbox" id="evt_temp">  <span data-i18n="evTemp">Температура</span></label>
+  </div>
+
+  <div class="sub" style="margin-top:14px">
+    <span data-i18n="curStatus">Текущий статус</span>: <b id="tg_status">—</b>
+  </div>
+
+  <div class="pane-actions">
+    <button onclick="saveAllPanes()" data-i18n="saveChanges">Сохранить изменения</button>
+    <button class="danger" onclick="resetPane('tg')" data-i18n="resetChanges">Сбросить изменения</button>
+    <button class="ok" onclick="tgTest()" data-i18n="tgTestBtn">Отправить тестовое сообщение</button>
+  </div>
+</div>
+
+<div class="tab-pane" id="tab-em">
+  <h2 data-i18n="emTitle">Уведомления по Email</h2>
+  <div class="info" data-i18n="emInfo">
+    Письма отправляются напрямую через SMTP-сервер по SSL (implicit TLS).<br>
+    Провайдер по умолчанию — Mail.ru (smtp.mail.ru:465).<br>
+    Логин, пароль и адреса хранятся в NVS.<br>
+    Категории событий фильтруют, какие уведомления отправлять.
+  </div>
+  <div class="row2">
+    <div><div class="label"><span data-i18n="lblEmHost">SMTP-сервер</span><span class="fi" data-tip="tipEmHost"></span></div>
+      <input id="c_emSmtpHost" placeholder="smtp.mail.ru"></div>
+    <div><div class="label"><span data-i18n="lblEmPort">Порт (465 — SSL)</span><span class="fi" data-tip="tipEmPort"></span></div>
+      <input id="c_emSmtpPort" type="number" placeholder="465"></div>
+  </div>
+  <div class="row2">
+    <div><div class="label"><span data-i18n="lblEmUser">Логин (email)</span><span class="fi" data-tip="tipEmUser"></span></div>
+      <input id="c_emUser" placeholder="user@mail.ru">
+      <div class="dupe" data-i18n="emUserHint">Обычно совпадает с адресом From</div>
+    </div>
+    <div><div class="label"><span data-i18n="lblEmPass">Пароль (App Password)</span><span class="fi" data-tip="tipEmPass"></span></div>
+      <input id="c_emPass" type="password" placeholder="******">
+      <div class="dupe" data-i18n="emPassHint">Mail.ru: Настройки → Пароли для внешних приложений</div>
+    </div>
+  </div>
+  <div class="row2">
+    <div><div class="label"><span data-i18n="lblEmFrom">От кого (From)</span><span class="fi" data-tip="tipEmFrom"></span></div>
+      <input id="c_emFrom" placeholder="user@mail.ru"></div>
+    <div><div class="label"><span data-i18n="lblEmTo">Кому (To)</span><span class="fi" data-tip="tipEmTo"></span></div>
+      <input id="c_emTo" placeholder="user@mail.ru"></div>
+  </div>
+  <div class="row2">
+    <div><div class="label"><span data-i18n="lblEmEnabled">Отправка включена</span><span class="fi" data-tip="tipEmEnable"></span></div>
+      <select id="c_emEnable">
+        <option value="1" data-i18n="yes">Да</option>
+        <option value="0" data-i18n="no">Нет</option>
+      </select>
+    </div>
+    <div><div class="label"><span data-i18n="lblEmPeriod">Периодический отчёт</span><span class="fi" data-tip="tipEmPeriod"></span></div>
+      <select id="c_emPeriod">
+        <option value="0" data-i18n="tgPeriodNone">Нет</option>
+        <option value="1" data-i18n="tgPeriodDay">День</option>
+        <option value="2" data-i18n="tgPeriodWeek">Неделя</option>
+        <option value="3" data-i18n="tgPeriodMonth">Месяц</option>
+      </select>
+    </div>
+  </div>
+
+  <h2 data-i18n="emEvents">События для отправки</h2>
+  <div class="tgcats">
+    <label><input type="checkbox" id="emt_power"> <span data-i18n="evPower">Питание</span></label>
+    <label><input type="checkbox" id="emt_batt">  <span data-i18n="evBatt">Батарея</span></label>
+    <label><input type="checkbox" id="emt_wol">   <span>WoL</span></label>
+    <label><input type="checkbox" id="emt_boot">  <span data-i18n="evBoot">Перезагрузки</span></label>
+    <label><input type="checkbox" id="emt_wifi">  <span data-i18n="evWifi">Wi-Fi</span></label>
+    <label><input type="checkbox" id="emt_snmp">  <span>SNMP</span></label>
+    <label><input type="checkbox" id="emt_ntp">   <span>NTP</span></label>
+    <label><input type="checkbox" id="emt_temp">  <span data-i18n="evTemp">Температура</span></label>
+  </div>
+
+  <div class="sub" style="margin-top:14px">
+    <span data-i18n="curStatus">Текущий статус</span>: <b id="em_status">—</b>
+  </div>
+
+  <div class="pane-actions">
+    <button onclick="saveAllPanes()" data-i18n="saveChanges">Сохранить изменения</button>
+    <button class="danger" onclick="resetPane('em')" data-i18n="resetChanges">Сбросить изменения</button>
+    <button class="ok" onclick="emTest()" data-i18n="emTestBtn">Отправить тестовое письмо</button>
+  </div>
+</div>
+
+<div class="tab-pane" id="tab-chart">
+  <div class="rangebtns" id="rangeRow">
+    <span id="rangeRowInner"></span>
+    <div class="rangelabel" id="rangeLabel">—</div>
+  </div>
+  <div class="sub" data-i18n="chartHint">График строится из лога напряжений.</div>
+
+  <div class="legend">
+    <label><input type="checkbox" id="chk_batt" checked>
+      <span class="swatch" style="background:#4ea1ff"></span>
+      <span data-i18n="legendBatt">Батарея, В</span></label>
+    <label><input type="checkbox" id="chk_inp" checked>
+      <span class="swatch" style="background:#3ecb6e"></span>
+      <span data-i18n="legendInput">Вход 12 В, В</span></label>
+    <label><input type="checkbox" id="chk_temp" checked>
+      <span class="swatch" style="background:#ff8c42"></span>
+      <span data-i18n="legendTemp">Температура, °C</span></label>
+  </div>
+
+  <div class="chartbox">
+    <canvas id="chartMain"></canvas>
+    <div class="loadmask" id="chartMask">
+      <div class="blink" data-i18n="chartLoading">Загрузка</div>
+    </div>
+  </div>
+
+  <div class="evtcats">
+    <span class="title" data-i18n="events">События:</span>
+    <label><input type="checkbox" id="ev_power" checked>
+      <svg width="16" height="16" viewBox="0 0 32 32"><path d="M18 4 L8 18 L14 18 L12 28 L24 12 L17 12 L20 4 Z" fill="#e84c3c"/></svg>
+      <span data-i18n="evPower">Питание</span></label>
+    <label><input type="checkbox" id="ev_batt" checked>
+      <svg width="16" height="16" viewBox="0 0 32 32"><rect x="4" y="10" width="22" height="12" rx="1" fill="none" stroke="#e8b53c" stroke-width="2"/><rect x="26" y="13" width="3" height="6" fill="#e8b53c"/><rect x="7" y="13" width="5" height="6" fill="#e8b53c"/></svg>
+      <span data-i18n="evBatt">Батарея</span></label>
+    <label><input type="checkbox" id="ev_wifi">
+      <svg width="16" height="16" viewBox="0 0 32 32"><path d="M4 14 A14 14 0 0 1 28 14" fill="none" stroke="#3ecb6e" stroke-width="2" stroke-linecap="round"/><path d="M8 18 A10 10 0 0 1 24 18" fill="none" stroke="#3ecb6e" stroke-width="2" stroke-linecap="round"/><path d="M12 22 A6 6 0 0 1 20 22" fill="none" stroke="#3ecb6e" stroke-width="2" stroke-linecap="round"/><circle cx="16" cy="26" r="1.8" fill="#3ecb6e"/></svg>
+      <span data-i18n="evWifi">Сеть</span></label>
+    <label><input type="checkbox" id="ev_snmp">
+      <svg width="16" height="16" viewBox="0 0 32 32"><rect x="4" y="8" width="24" height="16" rx="2" fill="none" stroke="#a35eff" stroke-width="2"/><path d="M4 10 L16 19 L28 10" fill="none" stroke="#a35eff" stroke-width="2" stroke-linejoin="round"/></svg>
+      <span>SNMP</span></label>
+    <label><input type="checkbox" id="ev_wol" checked>
+      <svg width="16" height="16" viewBox="0 0 32 32"><path d="M 8.2 11.5 A 9 9 0 1 0 23.8 11.5" fill="none" stroke="#4ea1ff" stroke-width="2.4" stroke-linecap="round"/><line x1="16" y1="4" x2="16" y2="17" stroke="#4ea1ff" stroke-width="2.4" stroke-linecap="round"/></svg>
+      <span>WoL</span></label>
+    <label><input type="checkbox" id="ev_ntp">
+      <svg width="16" height="16" viewBox="0 0 32 32"><circle cx="16" cy="16" r="11" fill="none" stroke="#00d4ff" stroke-width="2"/><line x1="16" y1="16" x2="16" y2="9" stroke="#00d4ff" stroke-width="2" stroke-linecap="round"/><line x1="16" y1="16" x2="21" y2="19" stroke="#00d4ff" stroke-width="2" stroke-linecap="round"/></svg>
+      <span>NTP</span></label>
+    <label><input type="checkbox" id="ev_boot">
+      <svg width="16" height="16" viewBox="0 0 32 32"><path d="M27 16 A11 11 0 1 1 16 5" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/><path d="M16 1 L22 5 L16 9 Z" fill="#ffffff"/></svg>
+      <span data-i18n="evBoot">Перезагрузки</span></label>
+    <label><input type="checkbox" id="ev_tg_em">
+      <svg width="16" height="16" viewBox="0 0 32 32"><rect x="4" y="8" width="24" height="16" rx="2" fill="none" stroke="#3ecb6e" stroke-width="2"/><path d="M4 10 L16 19 L28 10" fill="none" stroke="#3ecb6e" stroke-width="2" stroke-linejoin="round"/></svg>
+      <span data-i18n="evNotify">Уведомления</span></label>
+  </div>
+
+  <div class="actions" style="margin-top:14px">
+    <button onclick="loadChart()" data-i18n="refreshChart">Обновить график</button>
+  </div>
+</div>
+
+<div class="tab-pane" id="tab-log">
+  <div class="logcfg">
+    <h2 style="margin-top:0" data-i18n="logTitle">Настройки журнала</h2>
+
+    <div class="info2">
+      <span data-i18n="logFresh">Свежий</span>:
+      <b><span id="lc_logsize">—</span></b>
+      <span class="sep">|</span>
+      <span data-i18n="logArchive">Архив</span>:
+      <b><span id="lc_logold">—</span></b>
+      <span class="sep">|</span>
+      <span data-i18n="logTotal">Всего</span>:
+      <b><span id="lc_logtotal">—</span></b>
+      <span class="sep">|</span>
+      <span data-i18n="logLimitPerFile">Лимит на файл</span>:
+      <b><span id="lc_maxbytes">—</span></b>
+      <br>
+      <span data-i18n="freeInLfs">свободно в LittleFS</span>:
+      <b><span id="lc_lfsfree">—</span></b>
+    </div>
+
+    <div>
+      <div class="label">
+        <span data-i18n="logPeriod">Период записи</span><span class="fi" data-tip="tipLogPeriod"></span>
+        (<span data-i18n="fillIn">свежий заполнится за</span>
+        ~<b class="fillval"><span id="lc_fill1">—</span></b>)
+      </div>
+      <div style="max-width:260px">
+        <select id="lc_period" onchange="recalcFill()">
+          <option value="0" data-i18n="logOff">Откл. (только события)</option>
+          <option value="1" data-i18n="sec1">1 секунда</option>
+          <option value="30" data-i18n="sec30">30 секунд</option>
+          <option value="60" data-i18n="min1">1 минута</option>
+          <option value="120" data-i18n="min2">2 минуты</option>
+          <option value="300" data-i18n="min5">5 минут</option>
+          <option value="600" data-i18n="min10">10 минут</option>
+          <option value="1800" data-i18n="min30">30 минут</option>
+          <option value="3600" data-i18n="min60">60 минут</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="actions" style="margin-top:12px">
+      <button class="ok" onclick="saveLogCfg()" data-i18n="saveReboot">Сохранить и перезагрузить</button>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button onclick="loadLog()" data-i18n="read">Прочитать</button>
+    <button class="ghost" onclick="downloadLog()" data-i18n="download">Скачать</button>
+    <button class="danger" onclick="clearLog()" data-i18n="clear">Очистить</button>
+  </div>
+  <div style="position:relative">
+    <pre class="log" id="logbox" data-i18n="logHint">Нажми «Прочитать», чтобы открыть лог.</pre>
+    <div class="loadmask" id="logMask">
+      <div class="blink" data-i18n="chartLoading">Загрузка</div>
+    </div>
+  </div>
+</div>
+
+<div class="tab-pane" id="tab-ota">
+  <h2 data-i18n="otaTitle">Обновление прошивки по воздуху</h2>
+  <p class="sub" data-i18n="otaHint">Нажми кнопку ниже, откроется страница загрузки.</p>
+  <a class="ota-link" href="#" onclick="alert('Demo: OTA disabled'); return false;" data-i18n="otaOpen">Открыть страницу обновления</a>
+
+  <h2 style="margin-top:24px" data-i18n="otaCredTitle">Учётные данные OTA</h2>
+  <div class="row2">
+    <div><div class="label"><span data-i18n="lblOtaUser">OTA логин</span><span class="fi" data-tip="tipOtaUser"></span></div>
+      <input id="c_otaUser" placeholder="admin"></div>
+    <div><div class="label"><span data-i18n="lblOtaPass">OTA пароль</span><span class="fi" data-tip="tipOtaPass"></span></div>
+      <input id="c_otaPass" type="password" placeholder="••••••••"></div>
+  </div>
+
+  <p class="sub" style="margin-top:16px" data-i18n="otaSteps">
+    1. В Arduino IDE: Скетч → Экспорт бинарного файла.<br>
+    2. Получится файл .ino.bin.<br>
+    3. Открой страницу обновления, выбери файл, нажми «Обновить».<br>
+    4. Устройство перезагрузится автоматически.
+  </p>
+
+  <div class="pane-actions">
+    <button onclick="saveAllPanes()" data-i18n="saveChanges">Сохранить изменения</button>
+    <button class="danger" onclick="resetPane('ota')" data-i18n="resetChanges">Сбросить изменения</button>
+  </div>
+</div>
+
+<div class="footer" data-i18n="footer">Страница обновляется раз в 2 секунды.</div>
+
+<div class="evt-tip" id="evtTip"></div>
+<div id="tipField"></div>
+
+<script>
+//=================================================================
+// DEMO: Эмулятор бэкенда
+//=================================================================
+const DEMO_STATE = {
+  batteryV: 8.38,
+  inputV: 12.13,
+  tempC: 54.5,
+  powerLossCount: 0,
+  bootMs: Date.now() - 3600 * 1000 * 5,
+  ntpSynced: true,
+  inputPresent: true,
+  runtimeSec: 3800,
+  state: 0,
+  stateName: 'NORMAL',
+  logs: [],
+  queue: { tg: 0, em: 0 },
+  wolCode: 'IDLE',
+  wolSec: 0,
+  lfsFree: 1100000,
+  lfsTotal: 1200000,
+  logMaxBytes: 524288,
+  logPeriodSec: 120,
+  cfg: {
+    wifiSsid: 'DemoWiFi_2G',
+    wifiPass: '••••••••',
+    hostname: 'SNMP_FOR_DC_UPS_ESP32_WEB',
+    useDhcp: '0',
+    ip: '192.168.1.150',
+    mask: '255.255.255.0',
+    gw: '192.168.1.1',
+    dns: '192.168.1.1',
+    ntpServer1: 'pool.ntp.org',
+    ntpServer2: 'time.google.com',
+    ntpTz: 'MSK-3',
+    ntpSyncHour: 11,
+    ntpSyncMin: 30,
+    tempHighC: '75.0',
+    battFullV: '8.40',
+    battWarnV: '7.00',
+    battEmptyV: '6.00',
+    battCapacityWh: '38.48',
+    loadCurrentA: '2.00',
+    inputLostV: '11.00',
+    qnapIp: '192.168.1.124',
+    qnapMac: '24:5E:BE:3F:A3:33',
+    snmpCommunity: 'public',
+    snmpPort: '161',
+    useInform: '1',
+    enterpriseOid: '1.3.6.1.4.1.99999',
+    battOffsetMv: '0.00',
+    battGain: '1.0000',
+    inputOffsetMv: '0.00',
+    inputGain: '1.0000',
+    wolEnable: '1',
+    wolOutageMinSec: '600',
+    wolStableSec: '300',
+    wolBattMinPct: '70',
+    tgToken: '0000000000:DEMO-token',
+    tgChatId: '123456789',
+    tgEnable: '1',
+    tgPeriod: '1',
+    tgEvents: 0x00FF,
+    emSmtpHost: 'smtp.mail.ru',
+    emSmtpPort: '465',
+    emUser: 'demo@mail.ru',
+    emPass: '••••••••',
+    emFrom: 'demo@mail.ru',
+    emTo: 'admin@example.com',
+    emEnable: '1',
+    emPeriod: '1',
+    emEvents: 0x00FF,
+    otaUser: 'admin',
+    otaPass: 'CHANGE_ME',
+    uiLang: 'ru',
+    uiEventMask: 0x00FF,
+    logVoltPeriodSec: '120'
+  }
+};
+
+// Генерация демо-логов: 24 часа истории, все типы событий.
+// При INPUT_LOST входное напряжение падает до 1.5 В.
+function genDemoLogs() {
+  const logs = [];
+  const now = Date.now();
+  const step = 60 * 1000;   // 1 минута
+  const count = 24 * 60;    // 24 часа = 1440 точек
+
+  // Профиль питания: периоды работы от сети и от батареи
+  // За 24 часа — 4 аварии (по 15-25 минут).
+  const outages = [
+    { startH: 3,  startM: 15, durMin: 18 },
+    { startH: 9,  startM: 40, durMin: 22 },
+    { startH: 14, startM: 5,  durMin: 15 },
+    { startH: 20, startM: 30, durMin: 25 }
+  ];
+
+  // Спец-события (кроме аварий)
+  const extraEvents = [
+    { offsetMin: -1440 + 5,   type: 'BOOT',      text: 'boot R10.9-demo' },
+    { offsetMin: -1440 + 10,  type: 'WIFI_OK',   text: 'WiFi connected, IP=192.168.1.150' },
+    { offsetMin: -1440 + 30,  type: 'NTP_OK',    text: 'NTP synced (init)' },
+    { offsetMin: -720 + 15,   type: 'NTP_OK',    text: 'NTP synced (sched, 1/3)' },
+    { offsetMin: -360 + 45,   type: 'TEMP_HIGH', text: 'TEMP_HIGH: 78.4 C (threshold 75.0 C)' },
+    { offsetMin: -355 + 45,   type: 'TEMP_HIGH', text: 'TEMP_OK: 69.8 C (below 70.0 C)' },
+    { offsetMin: -180 + 20,   type: 'WIFI_LOST', text: 'WiFi lost' },
+    { offsetMin: -175 + 20,   type: 'WIFI_OK',   text: 'WiFi connected, IP=192.168.1.150' },
+    { offsetMin: -60 + 10,    type: 'NTP_OK',    text: 'NTP synced (manual)' }
+  ];
+
+  const nowD = new Date(now);
+  // Начало окна — 24 часа назад от текущего момента, выровнено по минуте
+  const startMs = now - 24 * 3600 * 1000;
+
+  for (let i = 0; i <= count; i++) {
+    const t = startMs + i * step;
+    const d = new Date(t);
+    const dhh = d.getHours();
+    const dmm = d.getMinutes();
+
+    // Проверяем, попадает ли текущая минута в аварию
+    let inOutage = false;
+    let activeOutage = null;
+    for (const o of outages) {
+      const oStartMin = o.startH * 60 + o.startM;
+      const oEndMin = oStartMin + o.durMin;
+      const curMin = dhh * 60 + dmm;
+      if (curMin >= oStartMin && curMin < oEndMin) {
+        inOutage = true;
+        activeOutage = o;
+        break;
+      }
+    }
+
+    // Батарея: слегка снижается при разряде, восстанавливается при заряде
+    const battBase = 8.39 - (inOutage ? (Math.random() * 0.05) : 0);
+    const batt = battBase + (Math.random() - 0.5) * 0.02;
+    const pct  = Math.round(85 + batt * 2 + Math.random() * 3);
+
+    // Вход: 12.13 при наличии, 1.50 при отсутствии
+    const inp = inOutage
+      ? (1.5 + (Math.random() - 0.5) * 0.04)
+      : (12.13 + (Math.random() - 0.5) * 0.03);
+
+    const temp = 53 + Math.random() * 3;
+    const rt   = inOutage
+      ? Math.round(3600 * Math.random() + 600)
+      : 3800 + Math.round(Math.random() * 100);
+
+    const ts = fmtTs(t);
+    logs.push({
+      t,
+      line: ts + ' [LOG] ' + batt.toFixed(2) + 'V/' + pct + '%|'
+          + inp.toFixed(2) + 'V/' + (inOutage ? 'LOST' : 'OK') + '|'
+          + rt + 's|' + temp.toFixed(1) + 'C'
+    });
+
+    // Начало аварии: STATE -> INPUT_LOST + SNMP + TG + EM
+    if (inOutage && activeOutage) {
+      const oStartMin = activeOutage.startH * 60 + activeOutage.startM;
+      const oEndMin = oStartMin + activeOutage.durMin;
+      const curMin = dhh * 60 + dmm;
+      if (curMin === oStartMin) {
+        const evtTs = fmtTs(t);
+        logs.push({ t, line: evtTs + ' [EVT] STATE -> INPUT_LOST' });
+        logs.push({ t: t + 1000, line: fmtTs(t + 1000) + ' [EVT] SNMP: INPUT_LOST' });
+        logs.push({ t: t + 2000, line: fmtTs(t + 2000) + ' [EVT] TG:OK' });
+        logs.push({ t: t + 3000, line: fmtTs(t + 3000) + ' [EVT] EM:OK' });
+      }
+      if (curMin === oEndMin - 1) {
+        logs.push({ t: t + 500, line: fmtTs(t + 500) + ' [EVT] STATE -> NORMAL' });
+        logs.push({ t: t + 1500, line: fmtTs(t + 1500) + ' [EVT] SNMP: INPUT_RESTORED' });
+      }
+    }
+  }
+
+  // Дополнительные события
+  for (const ev of extraEvents) {
+    const t = startMs + (ev.offsetMin + 1440) * 60 * 1000;
+    if (t > 0 && t <= now) {
+      logs.push({ t, line: fmtTs(t) + ' [EVT] ' + ev.text });
+    }
+  }
+
+  // Сортируем всё по времени
+  logs.sort((a, b) => a.t - b.t);
+  return logs;
+}
+
+function fmtTs(t) {
+  const d = new Date(t);
+  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
+       + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+}
+
+DEMO_STATE.logs = genDemoLogs();
+
+// Тикер: раз в 2 сек плавные колебания (только карточки, график статичный)
+setInterval(() => {
+  DEMO_STATE.batteryV += (Math.random() - 0.5) * 0.006;
+  DEMO_STATE.batteryV += (8.39 - DEMO_STATE.batteryV) * 0.05;
+  DEMO_STATE.batteryV = Math.max(8.36, Math.min(8.42, DEMO_STATE.batteryV));
+
+  DEMO_STATE.inputV += (Math.random() - 0.5) * 0.004;
+  DEMO_STATE.inputV += (12.13 - DEMO_STATE.inputV) * 0.05;
+  DEMO_STATE.inputV = Math.max(12.11, Math.min(12.15, DEMO_STATE.inputV));
+
+  DEMO_STATE.tempC += (Math.random() - 0.5) * 0.3;
+  DEMO_STATE.tempC = Math.max(52, Math.min(58, DEMO_STATE.tempC));
+
+  const pct = Math.round(85 + DEMO_STATE.batteryV * 2);
+  DEMO_STATE.runtimeSec = Math.round((pct / 100) * 38048 / 24);
+}, 2000);
+
+//=================================================================
+// Подмена fetch()
+//=================================================================
+const _originalFetch = window.fetch;
+window.fetch = async function(url, opts) {
+  const method = (opts && opts.method) || 'GET';
+  const path = url.toString();
+
+  if (path.endsWith('/api/status')) return jsonResponse(genStatusJson());
+  if (path.endsWith('/api/config') && method === 'GET') return jsonResponse(DEMO_STATE.cfg);
+  if (path.endsWith('/api/config') && method === 'POST') {
+    try {
+      const body = JSON.parse(opts.body || '{}');
+      for (const k in body) {
+        if (DEMO_STATE.cfg.hasOwnProperty(k)) DEMO_STATE.cfg[k] = body[k];
+      }
+    } catch(e) {}
+    return jsonResponse({ok: true});
+  }
+  if (path.endsWith('/api/ui_config')) {
+    try {
+      const body = JSON.parse(opts.body || '{}');
+      if (body.uiLang) DEMO_STATE.cfg.uiLang = body.uiLang;
+      if (body.uiEventMask) DEMO_STATE.cfg.uiEventMask = body.uiEventMask;
+    } catch(e) {}
+    return jsonResponse({ok: true});
+  }
+  if (path.endsWith('/api/log_config')) {
+    try {
+      const body = JSON.parse(opts.body || '{}');
+      if (body.logVoltPeriodSec !== undefined) DEMO_STATE.cfg.logVoltPeriodSec = body.logVoltPeriodSec;
+    } catch(e) {}
+    return jsonResponse({ok: true});
+  }
+  if (path.endsWith('/api/config_reset_pane')) return jsonResponse({ok: true});
+  if (path.endsWith('/api/reboot')) return jsonResponse({rebooting: true});
+  if (path.endsWith('/api/ntp_sync')) return jsonResponse({ok: true});
+  if (path.endsWith('/api/calibrate')) return jsonResponse({ok: true, gain: 1.0});
+  if (path.endsWith('/api/calibrate_reset')) return jsonResponse({ok: true});
+  if (path.endsWith('/api/wol_manual')) return jsonResponse({ok: true});
+  if (path.endsWith('/api/telegram_test')) return jsonResponse({ok: true});
+  if (path.endsWith('/api/email_test')) return jsonResponse({ok: true});
+  if (path.endsWith('/api/log')) {
+    const txt = DEMO_STATE.logs.map(l => l.line).join('\n');
+    return new Response(txt, {status: 200, headers: {'Content-Type': 'text/plain'}});
+  }
+  if (path.endsWith('/api/log_download')) {
+    return new Response('Demo: log download', {status: 200});
+  }
+  if (path.endsWith('/api/log_clear')) {
+    DEMO_STATE.logs = [];
+    return jsonResponse({ok: true});
+  }
+  return new Response('Demo: ' + path + ' not implemented', {status: 404});
+};
+
+function jsonResponse(obj) {
+  return new Response(JSON.stringify(obj), {
+    status: 200, headers: {'Content-Type': 'application/json'}
+  });
+}
+
+function genStatusJson() {
+  const st = DEMO_STATE;
+  const pct = Math.round(85 + st.batteryV * 2);
+  const upSec = Math.floor((Date.now() - st.bootMs) / 1000);
+  const upStr = fmtUptimeStr(upSec);
+  const dt = new Date();
+  const dtStr = fmtTs(dt.getTime());
+  return {
+    fw: 'R10.9-demo',
+    state: st.state, state_name: st.stateName,
+    battery_v: st.batteryV, input_v: st.inputV,
+    input_present: st.inputPresent,
+    battery_low: false, battery_critical: false,
+    battery_pct: pct, runtime_sec: st.runtimeSec,
+    sec_on_batt: 0,
+    uptime_sec: upSec, uptime_str: upStr,
+    datetime: dtStr, ntp_synced: st.ntpSynced,
+    temp_c: st.tempC,
+    heap_free: 165000 + Math.round(Math.random() * 2000),
+    ip: '192.168.1.150', ssid: 'DemoWiFi_2G',
+    rssi: -55 + Math.round(Math.random() * 6),
+    wifi_state: 'CONNECTED',
+    cal_batt_off: parseFloat(st.cfg.battOffsetMv),
+    cal_batt_gain: parseFloat(st.cfg.battGain),
+    cal_input_off: parseFloat(st.cfg.inputOffsetMv),
+    cal_input_gain: parseFloat(st.cfg.inputGain),
+    wol_status: '', wol_status_code: st.wolCode, wol_status_sec: st.wolSec,
+    tg_status: '', tg_status_code: st.cfg.tgEnable === '1' ? 'ACTIVE' : 'OFF',
+    tg_status_queue: st.queue.tg,
+    em_status: '', em_status_code: st.cfg.emEnable === '1' ? 'ACTIVE' : 'OFF',
+    em_status_queue: st.queue.em,
+    log_size: 345000, log_old_bytes: 410000, log_total_bytes: 755000,
+    log_max_bytes: st.logMaxBytes,
+    log_period_sec: parseInt(st.cfg.logVoltPeriodSec || '120'),
+    lfs_total: st.lfsTotal,
+    ui_lang: st.cfg.uiLang, ui_event_mask: st.cfg.uiEventMask,
+    lfs_free: st.lfsFree
+  };
+}
+
+function fmtUptimeStr(sec) {
+  const d = Math.floor(sec / 86400);
+  const rest = sec % 86400;
+  const h = Math.floor(rest / 3600);
+  const m = Math.floor((rest % 3600) / 60);
+  const s = rest % 60;
+  if (d > 0) return d + 'd ' + pad(h) + ':' + pad(m) + ':' + pad(s);
+  return pad(h) + ':' + pad(m) + ':' + pad(s);
+}
+
+function pad(n){return n<10?'0'+n:''+n;}
+</script>
+
+<script>
+//=================================================================
+// Основной JS дашборда (R10.9) — ПОЛНЫЙ RU + EN перевод
+//=================================================================
+const ICON_I = '<svg viewBox="0 0 16 16" width="14" height="14"><circle cx="8" cy="8" r="7" fill="none" stroke="#4ea1ff" stroke-width="1.5"/><rect x="7.2" y="6.6" width="1.6" height="5" fill="#4ea1ff"/><rect x="7.2" y="4.2" width="1.6" height="1.6" fill="#4ea1ff"/></svg>';
+
+const FLAG_RU = '<svg width="18" height="12" viewBox="0 0 18 12"><rect width="18" height="4" fill="#fff"/><rect y="4" width="18" height="4" fill="#0039a6"/><rect y="8" width="18" height="4" fill="#d52b1e"/></svg>';
+const FLAG_GB = '<svg width="18" height="12" viewBox="0 0 60 30"><rect width="60" height="30" fill="#012169"/><path d="M0,0 L60,30 M60,0 L0,30" stroke="#fff" stroke-width="6"/><path d="M0,0 L60,30 M60,0 L0,30" stroke="#C8102E" stroke-width="2"/><path d="M30,0 V30 M0,15 H60" stroke="#fff" stroke-width="10"/><path d="M30,0 V30 M0,15 H60" stroke="#C8102E" stroke-width="6"/></svg>';
+
+let curLang = 'ru';
+let isDirty = false;
+let lastWolCode = 'IDLE';
+let lastWolSec  = 0;
+let lastTgCode  = 'NOTSET';
+let lastTgSec   = 0;
+let lastEmCode  = 'NOTSET';
+let lastEmSec   = 0;
+let lastStateName = 'NORMAL';
+
+let chartRange   = 'hours';
+let chartToMs    = 0;
+let chartDataMin = 0;
+let chartDataMax = 0;
+let chartLoaded  = false;
+
+const HOUR_MS = 3600 * 1000;
+const DAY_MS  = 24 * 3600 * 1000;
+
+let uiCfgLoaded = false;
+
+const i18n = {
+  ru: {
+    curTime: "Текущее время", updTime: "Обновлено",
+    state: "Состояние", battery: "Аккумулятор", input12: "Вход 12 В",
+    runtime: "Runtime (прогноз)", voltUnit: "В",
+    ipWifi: "IP / Wi-Fi", cpuTemp: "Температура CPU", uptime: "Время работы",
+    heapFree: "Свободная память", lastUpd: "Последнее обновление",
+    wolStatus: "Статус WoL", tgStatus: "Статус Telegram", emStatus: "Статус Email",
+    settings: "Настройки", tabNet: "Системные настройки", tabCal: "Калибровка",
+    tabWol: "Автозапуск", tabTg: "Telegram", tabEm: "Email",
+    tabChart: "Графики", tabLog: "Логи", tabOta: "Обновление",
+    lblSsid: "SSID", lblPassword: "Пароль", lblIpMode: "Режим IP",
+    lblNetmask: "Маска", lblGateway: "Шлюз",
+    lblNtpSrv1: "NTP-сервер 1", lblNtpSrv2: "NTP-сервер 2",
+    lblTimezone: "Часовой пояс", lblNtpSyncTime: "Начало окна синхронизации NTP",
+    lblTempHighC: "Порог температуры, °C", lblBattFullV: "Батарея полная, В",
+    lblBattWarnV: "Предупреждение, В", lblBattEmptyV: "Батарея пустая, В",
+    lblBattCapacityWh: "Ёмкость, Вт·ч", lblInputLostV: "Пропадание входа, В",
+    lblLoadCurrentA: "Ток нагрузки, А",
+    lblQnapIp: "IP QNAP (адрес NAS-сервера)", lblQnapMac: "MAC-адрес QNAP (для WoL)",
+    lblCommunity: "Community (Группа доступа)", lblAgentPort: "Порт агента",
+    lblInformType: "Тип уведомлений", lblEnterpriseOid: "OID производителя",
+    lblRealVoltage: "Реальное напряжение, В",
+    lblWolEnabled: "Автозапуск включён",
+    lblWolOutage: "Пропадание питания более чем, сек",
+    lblWolStable: "Есть стабильное питание более чем, сек",
+    lblWolBattPct: "Мин. заряд батареи, %",
+    lblTgToken: "Bot Token", lblTgChatId: "Chat ID",
+    lblTgEnabled: "Отправка включена", lblTgPeriod: "Периодический отчёт",
+    lblEmHost: "SMTP-сервер", lblEmPort: "Порт (465 — SSL)",
+    lblEmUser: "Логин (email)", lblEmPass: "Пароль (App Password)",
+    lblEmFrom: "От кого (From)", lblEmTo: "Кому (To)",
+    lblEmEnabled: "Отправка включена", lblEmPeriod: "Периодический отчёт",
+    lblOtaUser: "OTA логин", lblOtaPass: "OTA пароль",
+    static: "Статический", yes: "Да", no: "Нет",
+    syncTime: "Синхронизировать время", saveChanges: "Сохранить изменения",
+    resetChanges: "Сбросить изменения",
+    calHint: "Введи реальное напряжение, измеренное мультиметром. Коэффициент gain рассчитается автоматически.",
+    now: "Сейчас", reading: "показание", calcGain: "Рассчитать gain", reset: "Сброс",
+    wolTitle: "Автозапуск сервера (Wake-on-LAN)",
+    wolInfo: "Пакет WoL отправляется, когда одновременно выполнено:<br>1. Было пропадание входного питания не менее заданного времени.<br>2. После восстановления питание стабильно удерживается.<br>3. Заряд аккумулятора не ниже указанного порога.<br>Пакет отправляется один раз за цикл аварии.",
+    syncSnmpHint: "Синхронизируется с вкладкой SNMP",
+    curStatus: "Текущий статус", wolSendBtn: "Отправить WoL вручную",
+    tgTitle: "Уведомления в Telegram",
+    tgInfo: "Сообщения отправляются через Telegram Bot API по HTTPS.<br>Токен и Chat ID хранятся в NVS и не попадают в код прошивки.<br>Категории событий фильтруют, какие уведомления отправлять.",
+    tgTokenHint: "Получить у @BotFather", tgChatHint: "Узнать у @userinfobot",
+    tgPeriodNone: "Нет", tgPeriodDay: "День", tgPeriodWeek: "Неделя", tgPeriodMonth: "Месяц",
+    tgEvents: "События для отправки", tgTestBtn: "Отправить тестовое сообщение",
+    emTitle: "Уведомления по Email",
+    emInfo: "Письма отправляются напрямую через SMTP-сервер по SSL (implicit TLS).<br>Провайдер по умолчанию — Mail.ru (smtp.mail.ru:465).<br>Логин, пароль и адреса хранятся в NVS.<br>Категории событий фильтруют, какие уведомления отправлять.",
+    emUserHint: "Обычно совпадает с адресом From",
+    emPassHint: "Mail.ru: Настройки → Пароли для внешних приложений",
+    emEvents: "События для отправки", emTestBtn: "Отправить тестовое письмо",
+    rangeHours: "Час", rangeDay: "Сутки",
+    chartHint: "График строится из лога напряжений.", chartLoading: "Загрузка",
+    legendBatt: "Батарея, В", legendInput: "Вход 12 В, В", legendTemp: "Температура, °C",
+    events: "События:", evPower: "Питание", evBatt: "Батарея", evWifi: "Сеть",
+    evBoot: "Перезагрузки", evTemp: "Температура", evNotify: "Уведомления",
+    refreshChart: "Обновить график", logTitle: "Настройки журнала",
+    logFresh: "Свежий", logArchive: "Архив", logTotal: "Всего",
+    logLimitPerFile: "Лимит на файл", freeInLfs: "свободно в LittleFS",
+    logPeriod: "Период записи", fillIn: "свежий заполнится за",
+    logOff: "Откл. (только события)", sec1: "1 секунда", sec30: "30 секунд",
+    min1: "1 минута", min2: "2 минуты", min5: "5 минут", min10: "10 минут",
+    min30: "30 минут", min60: "60 минут", saveReboot: "Сохранить и перезагрузить",
+    read: "Прочитать", download: "Скачать", clear: "Очистить",
+    logHint: "Нажми «Прочитать», чтобы открыть лог.",
+    otaTitle: "Обновление прошивки по воздуху",
+    otaCredTitle: "Учётные данные OTA",
+    otaHint: "Нажми кнопку ниже, откроется страница загрузки.",
+    otaOpen: "Открыть страницу обновления",
+    otaSteps: "1. В Arduino IDE: Скетч → Экспорт бинарного файла.<br>2. Получится файл .ino.bin.<br>3. Открой страницу обновления, выбери файл, нажми «Обновить».<br>4. Устройство перезагрузится автоматически.",
+    footer: "Страница обновляется раз в 2 секунды.",
+    powerOk: "Питание есть", powerLost: "Питание пропало",
+    ntpSynced: "синхронизировано", ntpNo: "нет",
+    confirmSave: "Сохранить изменения", confirmReset: "Сбросить изменения",
+    confirmResetQ: "к значениям по умолчанию?",
+    confirmResetNote: "Будут сброшены ТОЛЬКО поля этой вкладки.",
+    confirmReboot: "Устройство перезагрузится.",
+    savedOk: "сохранены. Перезагрузка через 2 секунды…",
+    resetOk: "сброшены. Перезагрузка через 2 секунды…",
+    saveErr: "Ошибка сохранения: ", resetErr: "Ошибка сброса: ",
+    confirmNtp: "Синхронизировать время по NTP сейчас?",
+    ntpSent: "Запрос NTP-синхронизации отправлен", ntpErr: "Ошибка запроса NTP",
+    confirmWol: "Отправить Wake-on-LAN на MAC из настроек?",
+    wolSent: "WoL-пакет отправлен", wolErr: "Ошибка отправки WoL",
+    confirmClearLog: "Удалить весь лог (свежий и архив)?", logCleared: "Лог очищен",
+    confirmSaveLog: "Сохранить настройки журнала и перезагрузить устройство?",
+    logSaved: "Настройки сохранены. Устройство перезагружается…",
+    logSaveErr: "Ошибка сохранения настроек лога",
+    confirmResetCal: "Сбросить калибровку для",
+    battShort: "аккумулятора", inputShort: "входа 12 В",
+    calApplied: "Калибровка применена: gain=", calApplied2: ". Нажми «Сохранить изменения».",
+    calReset: "Калибровка сброшена. Нажми «Сохранить изменения».",
+    calErr: "Ошибка калибровки", badVoltage: "Введи корректное напряжение",
+    confirmTgTest: "Отправить тестовое сообщение в Telegram?",
+    tgTestOk: "Тестовое сообщение отправлено",
+    tgTestErr: "Ошибка отправки. Проверь токен, chat_id и подключение.",
+    confirmEmTest: "Отправить тестовое письмо?",
+    emTestOk: "Тестовое письмо отправлено",
+    emTestErr: "Ошибка отправки. Проверь SMTP-настройки и пароль приложения.",
+    paneNet: "Системные настройки", paneSnmp: "SNMP", paneCal: "Калибровка",
+    paneWol: "Автозапуск", paneTg: "Telegram", paneEm: "Email", paneOta: "Обновление",
+    stateNORMAL: "Норма", stateINPUT_LOST: "Питание пропало",
+    stateLOW_BATT: "Низкий заряд", stateCRITICAL: "Критический",
+    wolStIdle: "Ожидание (авария не зафиксирована)", wolStSent: "Пакет отправлен",
+    wolStOutage: "Пропадание входа: {s} с", wolStWait: "Ожидание стабильного питания",
+    wolStStable: "Стабильно {s} с",
+    tgStNotSet: "Не настроен", tgStOff: "Отключён", tgStActive: "Активен",
+    tgStQueue: "Активен, очередь: {s}",
+    emStNotSet: "Не настроен", emStOff: "Отключён", emStActive: "Активен",
+    emStQueue: "Активен, очередь: {s}",
+    tzUTC: "UTC (UTC+0)", tzMSK: "Москва (UTC+3)",
+    tzEET: "Калининград / Хельсинки (UTC+2)",
+    tzKIEV: "Киев / Кишинёв (UTC+2/+3, DST)",
+    tzSAMARA: "Самара / Баку (UTC+4)", tzYEKT: "Екатеринбург (UTC+5)",
+    tzOMSK: "Омск (UTC+6)", tzKRAS: "Красноярск / Новосибирск (UTC+7)",
+    tzIRK: "Иркутск / Улан-Удэ (UTC+8)", tzYAK: "Якутск / Чита (UTC+9)",
+    tzVLA: "Владивосток (UTC+10)", tzMAG: "Магадан (UTC+11)",
+    tzPET: "Камчатка (UTC+12)", tzTASH: "Ташкент / Астана (UTC+5)",
+    tzIST: "Стамбул / Багдад (UTC+3)", tzCET: "Берлин / Париж (UTC+1/+2, DST)",
+    tzGMT: "Лондон (UTC+0/+1, DST)", tzEST: "Нью-Йорк (UTC−5/−4, DST)",
+    tzPST: "Лос-Анджелес (UTC−8/−7, DST)", tzTOK: "Токио (UTC+9)",
+    tzCHN: "Пекин / Шанхай (UTC+8)", tzDEL: "Дели (UTC+5:30)",
+    tzSYD: "Сидней (UTC+10/+11, DST)",
+    tipEvtInputLost: "Питание пропало", tipEvtInputRest: "Питание восстановлено",
+    tipEvtBattLow: "Низкий заряд", tipEvtBattCrit: "Критический разряд",
+    tipEvtSnmp: "SNMP-уведомление", tipEvtWol: "Wake-on-LAN",
+    tipEvtNtpOk: "NTP: синхронизация OK", tipEvtNtpFail: "NTP: ошибка синхронизации",
+    tipEvtBoot: "Перезагрузка", tipEvtWifiOk: "Wi-Fi подключён",
+    tipEvtWifiLost: "Wi-Fi потерян", tipEvtTempHigh: "Перегрев CPU",
+    tipEvtTgOk: "Telegram: отправлено", tipEvtTgFail: "Telegram: ошибка",
+    tipEvtEmOk: "Email: отправлено", tipEvtEmFail: "Email: ошибка",
+    leaveWarn: "На странице есть несохранённые изменения. Покинуть без сохранения?",
+    tipSsid: "Имя вашей Wi-Fi сети 2,4 ГГц. Чувствительно к регистру.",
+    tipWifiPass: "Пароль Wi-Fi. Хранится в NVS. Если не указать — устройство не подключится к сети (режима AP нет).",
+    tipHostname: "Сетевое имя устройства. Отображается в роутере и mDNS.",
+    tipIpMode: "Статический IP — адрес вводится вручную (по умолчанию 192.168.1.150). DHCP — адрес выдаёт роутер автоматически.",
+    tipIp: "IP-адрес устройства. Используется для доступа к веб-дашборду, SNMP и OTA.",
+    tipMask: "Маска подсети. Обычно 255.255.255.0.",
+    tipGw: "Адрес шлюза (роутера). Обычно 192.168.1.1.",
+    tipDns: "DNS-сервер для разрешения имён (NTP, Telegram, SMTP). Обычно совпадает со шлюзом.",
+    tipNtpSrv1: "Основной NTP-сервер. По умолчанию pool.ntp.org.",
+    tipNtpSrv2: "Резервный NTP-сервер. По умолчанию time.google.com.",
+    tipTz: "Часовой пояс. Влияет на все временные метки в логе и уведомлениях.",
+    tipNtpSync: "NTP всегда включён. Раз в сутки — плановая синхронизация в окне 1 час, до 3 попыток с интервалом 30 мин. Третья попытка может выйти за границу окна. Окно не может пересекать полночь.",
+    tipTempHigh: "Порог температуры кристалла ESP32 (°C). При превышении — событие TEMP_HIGH и уведомления. Гистерезис 5 °C.",
+    tipBattFull: "Напряжение полностью заряженной батареи (100%). Для 2S Li-ion — 8,4 В.",
+    tipBattWarn: "Порог низкого заряда. При падении ниже — состояние LOW_BATT и уведомления.",
+    tipBattEmpty: "Порог «батарея пуста» (0%). При падении ниже — состояние CRITICAL, QNAP выключается.",
+    tipBattCapacity: "Расчётная ёмкость батареи в Вт·ч. Используется для прогноза runtime.",
+    tipInputLost: "Порог пропадания входного питания. Ниже — фиксируется INPUT_LOST. Гистерезис 0,2 В.",
+    tipLoadCurrent: "Средний ток нагрузки в амперах при 12 В. Используется для расчёта runtime.",
+    tipQnapIp: "IP-адрес QNAP NAS. На него отправляются SNMP INFORM/TRAP при авариях.",
+    tipQnapMac: "MAC-адрес QNAP в формате AA:BB:CC:DD:EE:FF. Используется для Wake-on-LAN.",
+    tipCommunity: "SNMP community (по умолчанию public). Должно совпадать в QNAP.",
+    tipSnmpPort: "Порт SNMP-агента. Стандартный — 161.",
+    tipInformType: "INFORM — с подтверждением (надёжнее). TRAP — без подтверждения.",
+    tipEntOid: "Корневой OID приватной ветки. По умолчанию 1.3.6.1.4.1.99999.",
+    tipCalRealBatt: "Замерьте напряжение АКБ мультиметром и введите точное значение. Gain рассчитается автоматически.",
+    tipCalRealInput: "Замерьте напряжение входа 12 В мультиметром и введите точное значение.",
+    tipWolEnable: "Включить автозапуск QNAP через Wake-on-LAN после восстановления питания.",
+    tipWolOutage: "Минимальная длительность пропадания питания (сек), после которой срабатывает WoL.",
+    tipWolStable: "Минимальное время стабильного питания после восстановления (сек).",
+    tipWolBattPct: "Минимальный заряд батареи (%), при котором разрешён WoL.",
+    tipTgToken: "Токен бота от @BotFather. Хранится в NVS.",
+    tipTgChatId: "ID чата получателя. Узнать у @userinfobot. Не забудьте написать боту /start.",
+    tipTgEnable: "Глобальный флаг отправки уведомлений в Telegram.",
+    tipTgPeriod: "Периодический отчёт в 12:00: каждый день / по понедельникам / 1-го числа. «Нет» — отключено.",
+    tipEmHost: "SMTP-сервер. Mail.ru: smtp.mail.ru.",
+    tipEmPort: "Порт SMTP. Для Mail.ru — 465 (SSL, implicit TLS).",
+    tipEmUser: "Логин — полный адрес email.",
+    tipEmPass: "Пароль для внешнего приложения (не обычный пароль!). Mail.ru: Настройки → Безопасность → Пароли для внешних приложений.",
+    tipEmFrom: "Адрес отправителя (обычно совпадает с логином).",
+    tipEmTo: "Адрес получателя.",
+    tipEmEnable: "Глобальный флаг отправки уведомлений по Email.",
+    tipEmPeriod: "Периодический отчёт в 12:00: каждый день / по понедельникам / 1-го числа. «Нет» — отключено.",
+    tipOtaUser: "Логин для страницы /update. Хранится в NVS. Значение по умолчанию — admin.",
+    tipOtaPass: "Пароль для страницы /update. Хранится в NVS. После первого сохранения через дашборд config.h игнорируется.",
+    tipLogPeriod: "Период записи строк [LOG] в журнал. «Откл.» — только события. Значение влияет на объём и срок хранения истории."
+  },
+  en: {
+    curTime: "Current time", updTime: "Updated",
+    state: "State", battery: "Battery", input12: "Input 12V",
+    runtime: "Runtime (est.)", voltUnit: "V",
+    ipWifi: "IP / Wi-Fi", cpuTemp: "CPU temperature", uptime: "Uptime",
+    heapFree: "Heap free", lastUpd: "Last update",
+    wolStatus: "WoL status", tgStatus: "Telegram status", emStatus: "Email status",
+    settings: "Settings", tabNet: "System settings", tabCal: "Calibration",
+    tabWol: "Auto-start", tabTg: "Telegram", tabEm: "Email",
+    tabChart: "Charts", tabLog: "Logs", tabOta: "Update",
+    lblSsid: "SSID", lblPassword: "Password", lblIpMode: "IP mode",
+    lblNetmask: "Netmask", lblGateway: "Gateway",
+    lblNtpSrv1: "NTP server 1", lblNtpSrv2: "NTP server 2",
+    lblTimezone: "Timezone", lblNtpSyncTime: "NTP sync window start",
+    lblTempHighC: "Temperature threshold, °C", lblBattFullV: "Battery full, V",
+    lblBattWarnV: "Warning threshold, V", lblBattEmptyV: "Battery empty, V",
+    lblBattCapacityWh: "Capacity, Wh", lblInputLostV: "Input lost, V",
+    lblLoadCurrentA: "Load current, A",
+    lblQnapIp: "QNAP IP (NAS address)", lblQnapMac: "QNAP MAC (for WoL)",
+    lblCommunity: "Community (access group)", lblAgentPort: "Agent port",
+    lblInformType: "Notification type", lblEnterpriseOid: "Vendor OID",
+    lblRealVoltage: "Real voltage, V",
+    lblWolEnabled: "Auto-start enabled",
+    lblWolOutage: "Power outage more than, s",
+    lblWolStable: "Stable power more than, s",
+    lblWolBattPct: "Min. battery charge, %",
+    lblTgToken: "Bot Token", lblTgChatId: "Chat ID",
+    lblTgEnabled: "Sending enabled", lblTgPeriod: "Periodic report",
+    lblEmHost: "SMTP server", lblEmPort: "Port (465 — SSL)",
+    lblEmUser: "Login (email)", lblEmPass: "Password (App Password)",
+    lblEmFrom: "From address", lblEmTo: "To address",
+    lblEmEnabled: "Sending enabled", lblEmPeriod: "Periodic report",
+    lblOtaUser: "OTA username", lblOtaPass: "OTA password",
+    static: "Static", yes: "Yes", no: "No",
+    syncTime: "Sync time", saveChanges: "Save changes",
+    resetChanges: "Reset changes",
+    calHint: "Enter the real voltage measured with a multimeter. The gain coefficient will be calculated automatically.",
+    now: "Current", reading: "reading", calcGain: "Calculate gain", reset: "Reset",
+    wolTitle: "Server auto-start (Wake-on-LAN)",
+    wolInfo: "WoL packet is sent when all of the following is true:<br>1. Input power was lost for at least the specified time.<br>2. After restoration, power is stable for at least the specified time.<br>3. Battery charge is not below the specified threshold.<br>The packet is sent once per outage cycle.",
+    syncSnmpHint: "Synchronized with SNMP tab",
+    curStatus: "Current status", wolSendBtn: "Send WoL manually",
+    tgTitle: "Telegram notifications",
+    tgInfo: "Messages are sent via Telegram Bot API over HTTPS.<br>Token and Chat ID are stored in NVS, not in firmware code.<br>Event categories filter which notifications are sent.",
+    tgTokenHint: "Get it from @BotFather", tgChatHint: "Get it from @userinfobot",
+    tgPeriodNone: "None", tgPeriodDay: "Day", tgPeriodWeek: "Week", tgPeriodMonth: "Month",
+    tgEvents: "Events to send", tgTestBtn: "Send test message",
+    emTitle: "Email notifications",
+    emInfo: "Emails are sent directly to the SMTP server over SSL (implicit TLS).<br>Default provider — Mail.ru (smtp.mail.ru:465).<br>Login, password and addresses are stored in NVS.<br>Event categories filter which notifications are sent.",
+    emUserHint: "Usually matches the From address",
+    emPassHint: "Mail.ru: Settings → External app passwords",
+    emEvents: "Events to send", emTestBtn: "Send test email",
+    rangeHours: "Hour", rangeDay: "Day",
+    chartHint: "Chart is built from the voltage log.", chartLoading: "Loading",
+    legendBatt: "Battery, V", legendInput: "Input 12V, V", legendTemp: "Temperature, °C",
+    events: "Events:", evPower: "Power", evBatt: "Battery", evWifi: "Network",
+    evBoot: "Reboots", evTemp: "Temperature", evNotify: "Notifications",
+    refreshChart: "Refresh chart", logTitle: "Log settings",
+    logFresh: "Fresh", logArchive: "Archive", logTotal: "Total",
+    logLimitPerFile: "Limit per file", freeInLfs: "free in LittleFS",
+    logPeriod: "Log interval", fillIn: "fresh will fill in",
+    logOff: "Off (events only)", sec1: "1 second", sec30: "30 seconds",
+    min1: "1 minute", min2: "2 minutes", min5: "5 minutes", min10: "10 minutes",
+    min30: "30 minutes", min60: "60 minutes", saveReboot: "Save and reboot",
+    read: "Read", download: "Download", clear: "Clear",
+    logHint: "Press «Read» to open the log.",
+    otaTitle: "Over-the-air firmware update",
+    otaCredTitle: "OTA credentials",
+    otaHint: "Press the button below to open the upload page.",
+    otaOpen: "Open update page",
+    otaSteps: "1. In Arduino IDE: Sketch → Export compiled binary.<br>2. You get a .ino.bin file.<br>3. Open the update page, select the file, press «Update».<br>4. The device will reboot automatically.",
+    footer: "Page refreshes every 2 seconds.",
+    powerOk: "Power OK", powerLost: "Power lost",
+    ntpSynced: "synced", ntpNo: "no",
+    confirmSave: "Save changes", confirmReset: "Reset changes",
+    confirmResetQ: "to default values?",
+    confirmResetNote: "Only fields of this tab will be reset.",
+    confirmReboot: "The device will reboot.",
+    savedOk: "saved. Reboot in 2 seconds…",
+    resetOk: "reset. Reboot in 2 seconds…",
+    saveErr: "Save error: ", resetErr: "Reset error: ",
+    confirmNtp: "Sync time via NTP now?",
+    ntpSent: "NTP sync request sent", ntpErr: "NTP request error",
+    confirmWol: "Send Wake-on-LAN to the configured MAC?",
+    wolSent: "WoL packet sent", wolErr: "WoL send error",
+    confirmClearLog: "Delete the entire log (fresh and archive)?", logCleared: "Log cleared",
+    confirmSaveLog: "Save log settings and reboot the device?",
+    logSaved: "Settings saved. Device is rebooting…",
+    logSaveErr: "Log settings save error",
+    confirmResetCal: "Reset calibration for",
+    battShort: "battery", inputShort: "input 12V",
+    calApplied: "Calibration applied: gain=", calApplied2: ". Press «Save changes».",
+    calReset: "Calibration reset. Press «Save changes».",
+    calErr: "Calibration error", badVoltage: "Enter a valid voltage",
+    confirmTgTest: "Send a test message to Telegram?",
+    tgTestOk: "Test message sent",
+    tgTestErr: "Send failed. Check token, chat_id and connection.",
+    confirmEmTest: "Send a test email?",
+    emTestOk: "Test email sent",
+    emTestErr: "Send failed. Check SMTP settings and app password.",
+    paneNet: "System settings", paneSnmp: "SNMP", paneCal: "Calibration",
+    paneWol: "Auto-start", paneTg: "Telegram", paneEm: "Email", paneOta: "Update",
+    stateNORMAL: "Normal", stateINPUT_LOST: "Input lost",
+    stateLOW_BATT: "Low battery", stateCRITICAL: "Critical",
+    wolStIdle: "Idle (no outage recorded)", wolStSent: "Packet sent",
+    wolStOutage: "Input outage: {s} s", wolStWait: "Waiting for stable power",
+    wolStStable: "Stable for {s} s",
+    tgStNotSet: "Not configured", tgStOff: "Disabled", tgStActive: "Active",
+    tgStQueue: "Active, queue: {s}",
+    emStNotSet: "Not configured", emStOff: "Disabled", emStActive: "Active",
+    emStQueue: "Active, queue: {s}",
+    tzUTC: "UTC (UTC+0)", tzMSK: "Moscow (UTC+3)",
+    tzEET: "Kaliningrad / Helsinki (UTC+2)",
+    tzKIEV: "Kiev / Chisinau (UTC+2/+3, DST)",
+    tzSAMARA: "Samara / Baku (UTC+4)", tzYEKT: "Yekaterinburg (UTC+5)",
+    tzOMSK: "Omsk (UTC+6)", tzKRAS: "Krasnoyarsk / Novosibirsk (UTC+7)",
+    tzIRK: "Irkutsk / Ulan-Ude (UTC+8)", tzYAK: "Yakutsk / Chita (UTC+9)",
+    tzVLA: "Vladivostok (UTC+10)", tzMAG: "Magadan (UTC+11)",
+    tzPET: "Kamchatka (UTC+12)", tzTASH: "Tashkent / Astana (UTC+5)",
+    tzIST: "Istanbul / Baghdad (UTC+3)", tzCET: "Berlin / Paris (UTC+1/+2, DST)",
+    tzGMT: "London (UTC+0/+1, DST)", tzEST: "New York (UTC−5/−4, DST)",
+    tzPST: "Los Angeles (UTC−8/−7, DST)", tzTOK: "Tokyo (UTC+9)",
+    tzCHN: "Beijing / Shanghai (UTC+8)", tzDEL: "Delhi (UTC+5:30)",
+    tzSYD: "Sydney (UTC+10/+11, DST)",
+    tipEvtInputLost: "Input lost", tipEvtInputRest: "Input restored",
+    tipEvtBattLow: "Low battery", tipEvtBattCrit: "Critical battery",
+    tipEvtSnmp: "SNMP notification", tipEvtWol: "Wake-on-LAN",
+    tipEvtNtpOk: "NTP: sync OK", tipEvtNtpFail: "NTP: sync FAILED",
+    tipEvtBoot: "Reboot", tipEvtWifiOk: "Wi-Fi connected",
+    tipEvtWifiLost: "Wi-Fi lost", tipEvtTempHigh: "CPU overheat",
+    tipEvtTgOk: "Telegram: sent", tipEvtTgFail: "Telegram: FAILED",
+    tipEvtEmOk: "Email: sent", tipEvtEmFail: "Email: FAILED",
+    leaveWarn: "There are unsaved changes on this page. Leave without saving?",
+    tipSsid: "Your 2.4 GHz Wi-Fi network name. Case-sensitive.",
+    tipWifiPass: "Wi-Fi password. Stored in NVS. If not set — device won't connect (no AP mode).",
+    tipHostname: "Device hostname. Visible in the router and mDNS.",
+    tipIpMode: "Static IP — set manually (default 192.168.1.150). DHCP — assigned by router.",
+    tipIp: "Device IP address. Used for web dashboard, SNMP and OTA.",
+    tipMask: "Subnet mask. Usually 255.255.255.0.",
+    tipGw: "Gateway address (router). Usually 192.168.1.1.",
+    tipDns: "DNS server for name resolution (NTP, Telegram, SMTP). Usually equals gateway.",
+    tipNtpSrv1: "Primary NTP server. Default: pool.ntp.org.",
+    tipNtpSrv2: "Fallback NTP server. Default: time.google.com.",
+    tipTz: "Time zone. Affects all timestamps in logs and notifications.",
+    tipNtpSync: "NTP always enabled. Once a day — scheduled sync in a 1-hour window, up to 3 attempts with 30 min interval. The third attempt may exceed the window. Window cannot cross midnight.",
+    tipTempHigh: "ESP32 crystal temperature threshold (°C). When exceeded — TEMP_HIGH event and notifications. 5 °C hysteresis.",
+    tipBattFull: "Fully charged battery voltage (100%). For 2S Li-ion — 8.4 V.",
+    tipBattWarn: "Low charge threshold. Below — LOW_BATT state and notifications.",
+    tipBattEmpty: "Empty battery threshold (0%). Below — CRITICAL state, QNAP shuts down.",
+    tipBattCapacity: "Estimated battery capacity in Wh. Used for runtime prediction.",
+    tipInputLost: "Input power loss threshold. Below — INPUT_LOST is fixed. Hysteresis 0.2 V.",
+    tipLoadCurrent: "Average load current in amperes at 12 V. Used for runtime calculation.",
+    tipQnapIp: "QNAP NAS IP address. SNMP INFORM/TRAP notifications are sent to it.",
+    tipQnapMac: "QNAP MAC address in AA:BB:CC:DD:EE:FF format. Used for Wake-on-LAN.",
+    tipCommunity: "SNMP community (default public). Must match in QNAP.",
+    tipSnmpPort: "SNMP agent port. Standard — 161.",
+    tipInformType: "INFORM — with acknowledgment (more reliable). TRAP — without.",
+    tipEntOid: "Root OID of the private subtree. Default 1.3.6.1.4.1.99999.",
+    tipCalRealBatt: "Measure battery voltage with a multimeter and enter the exact value. Gain will be calculated automatically.",
+    tipCalRealInput: "Measure input 12 V voltage with a multimeter and enter the exact value.",
+    tipWolEnable: "Enable QNAP auto-start via Wake-on-LAN after power restore.",
+    tipWolOutage: "Minimum power outage duration (s) that triggers WoL.",
+    tipWolStable: "Minimum stable power time after restore (s).",
+    tipWolBattPct: "Minimum battery charge (%), at which WoL is allowed.",
+    tipTgToken: "Bot token from @BotFather. Stored in NVS.",
+    tipTgChatId: "Recipient chat ID. Get it from @userinfobot. Don't forget to send /start to the bot.",
+    tipTgEnable: "Global flag for sending Telegram notifications.",
+    tipTgPeriod: "Periodic report at 12:00: daily / on Mondays / on the 1st. «None» — disabled.",
+    tipEmHost: "SMTP server. Mail.ru: smtp.mail.ru.",
+    tipEmPort: "SMTP port. For Mail.ru — 465 (SSL, implicit TLS).",
+    tipEmUser: "Login — full email address.",
+    tipEmPass: "External app password (not the regular one!). Mail.ru: Settings → Security → External app passwords.",
+    tipEmFrom: "Sender address (usually equals login).",
+    tipEmTo: "Recipient address.",
+    tipEmEnable: "Global flag for sending Email notifications.",
+    tipEmPeriod: "Periodic report at 12:00: daily / on Mondays / on the 1st. «None» — disabled.",
+    tipOtaUser: "Username for /update page. Stored in NVS. Default — admin.",
+    tipOtaPass: "Password for /update page. Stored in NVS. After first save via dashboard config.h is ignored.",
+    tipLogPeriod: "Interval for [LOG] entries. «Off» — events only. Affects the volume and retention of history."
+  }
+};
+
+function tr(key) {
+  return (i18n[curLang] && i18n[curLang][key]) || key;
+}
+
+function stateLabel(name) { return tr('state' + name); }
+
+function installFieldIcons() {
+  document.querySelectorAll('.fi').forEach(el => { el.innerHTML = ICON_I; });
+}
+
+(function initFieldTooltip() {
+  const tip = document.getElementById('tipField');
+  if (!tip) return;
+  document.addEventListener('mouseover', (e) => {
+    const target = e.target.closest('.fi');
+    if (!target) return;
+    const key = target.getAttribute('data-tip');
+    if (!key) return;
+    const txt = tr(key);
+    if (!txt) return;
+    tip.textContent = txt;
+    tip.style.display = 'block';
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (tip.style.display !== 'block') return;
+    const x = e.clientX + 14, y = e.clientY + 14;
+    const maxX = window.innerWidth - tip.offsetWidth - 10;
+    const maxY = window.innerHeight - tip.offsetHeight - 10;
+    tip.style.left = Math.min(x, maxX) + 'px';
+    tip.style.top  = Math.min(y, maxY) + 'px';
+  });
+  document.addEventListener('mouseout', (e) => {
+    if (!e.target.closest('.fi')) return;
+    tip.style.display = 'none';
+  });
+})();
+
+function updateWolStatus() {
+  let s = '';
+  switch (lastWolCode) {
+    case 'SENT':   s = tr('wolStSent'); break;
+    case 'OUTAGE': s = tr('wolStOutage').replace('{s}', lastWolSec); break;
+    case 'WAIT':   s = tr('wolStWait'); break;
+    case 'STABLE': s = tr('wolStStable').replace('{s}', lastWolSec); break;
+    default:       s = tr('wolStIdle'); break;
+  }
+  const a = document.getElementById('wolst');
+  const b = document.getElementById('wol_status');
+  if (a) a.textContent = s;
+  if (b) b.textContent = s;
+}
+
+function updateTgStatus() {
+  let s = '';
+  switch (lastTgCode) {
+    case 'NOTSET': s = tr('tgStNotSet'); break;
+    case 'OFF':    s = tr('tgStOff'); break;
+    case 'QUEUE':  s = tr('tgStQueue').replace('{s}', lastTgSec); break;
+    default:       s = tr('tgStActive'); break;
+  }
+  const a = document.getElementById('tgst');
+  const b = document.getElementById('tg_status');
+  if (a) a.textContent = s;
+  if (b) b.textContent = s;
+}
+
+function updateEmStatus() {
+  let s = '';
+  switch (lastEmCode) {
+    case 'NOTSET': s = tr('emStNotSet'); break;
+    case 'OFF':    s = tr('emStOff'); break;
+    case 'QUEUE':  s = tr('emStQueue').replace('{s}', lastEmSec); break;
+    default:       s = tr('emStActive'); break;
+  }
+  const a = document.getElementById('emst');
+  const b = document.getElementById('em_status');
+  if (a) a.textContent = s;
+  if (b) b.textContent = s;
+}
+
+function initNtpTimeSelects() {
+  const hSel = document.getElementById('c_ntpSyncHour');
+  const mSel = document.getElementById('c_ntpSyncMin');
+  if (!hSel || !mSel) return;
+  if (hSel.options.length === 0) {
+    for (let h = 0; h < 24; h++) {
+      const o = document.createElement('option');
+      o.value = h; o.textContent = (h < 10 ? '0' : '') + h;
+      hSel.appendChild(o);
+    }
+  }
+  if (mSel.options.length === 0) {
+    for (let m = 0; m < 60; m += 5) {
+      const o = document.createElement('option');
+      o.value = m; o.textContent = (m < 10 ? '0' : '') + m;
+      mSel.appendChild(o);
+    }
+  }
+}
+
+function setNtpTimeValues(hour, min) {
+  const hSel = document.getElementById('c_ntpSyncHour');
+  const mSel = document.getElementById('c_ntpSyncMin');
+  if (!hSel || !mSel) return;
+  let m = parseInt(min); if (isNaN(m)) m = 30;
+  m = Math.round(m / 5) * 5;
+  if (m > 55) m = 55; if (m < 0) m = 0;
+  let h = parseInt(hour); if (isNaN(h)) h = 11;
+  if (h > 23) h = 23; if (h < 0) h = 0;
+  hSel.value = h; mSel.value = m;
+}
+
+function applyLang(lang) {
+  curLang = lang;
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    const val = tr(key);
+    if (el.classList.contains('label') && val.indexOf(':') < 0) el.textContent = val + ':';
+    else if (val.indexOf('<') >= 0) el.innerHTML = val;
+    else el.textContent = val;
+  });
+  document.querySelectorAll('#c_ntpTz option[data-tz]').forEach(opt => {
+    const tzKey = opt.getAttribute('data-tz');
+    const txt = tr(tzKey);
+    if (txt && txt !== tzKey) opt.textContent = txt;
+  });
+  const flagEl = document.getElementById('langFlag');
+  const codeEl = document.getElementById('langCode');
+  if (flagEl) flagEl.innerHTML = (lang === 'ru' ? FLAG_RU : FLAG_GB);
+  if (codeEl) codeEl.textContent = (lang === 'ru' ? 'RU' : 'EN');
+  if (document.getElementById('clk_ntp')) {
+    const isSynced = document.getElementById('clk_ntp').dataset.synced === '1';
+    document.getElementById('clk_ntp').textContent = isSynced ? tr('ntpSynced') : tr('ntpNo');
+  }
+  if (document.getElementById('inpSt')) {
+    const isOk = document.getElementById('inpSt').dataset.ok === '1';
+    document.getElementById('inpSt').textContent = isOk ? tr('powerOk') : tr('powerLost');
+  }
+  const stEl = document.getElementById('state');
+  if (stEl) stEl.textContent = stateLabel(lastStateName);
+  updateWolStatus(); updateTgStatus(); updateEmStatus();
+  renderRangeRow();
+}
+
+function toggleLang() {
+  const newLang = (curLang === 'ru' ? 'en' : 'ru');
+  applyLang(newLang);
+  saveUiLang(newLang);
+}
+
+async function saveUiLang(lang) {
+  try {
+    await fetch('/api/ui_config', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({uiLang: lang})
+    });
+  } catch(e) {}
+}
+
+function rangeMs() { return chartRange === 'hours' ? HOUR_MS : DAY_MS; }
+function ceilToHour(ms) { const h = 3600 * 1000; return Math.ceil(ms / h) * h; }
+function initChartWindow() { chartToMs = ceilToHour(Date.now()); }
+function fmtDT(ms) {
+  const d = new Date(ms);
+  return pad(d.getDate()) + '.' + pad(d.getMonth()+1) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+function formatRangeLabel() {
+  const to = chartToMs || ceilToHour(Date.now());
+  const from = to - rangeMs();
+  return fmtDT(from) + ' – ' + fmtDT(to);
+}
+function renderRangeRow() {
+  const inner = document.getElementById('rangeRowInner');
+  const label = document.getElementById('rangeLabel');
+  if (!inner) return;
+  const isHour = (chartRange === 'hours');
+  const canBack = chartLoaded && chartDataMin > 0 && (chartToMs - rangeMs()) > chartDataMin;
+  const canFwd = chartLoaded && chartToMs < ceilToHour(Date.now());
+  const btnHour = '<button class="' + (isHour ? 'active' : '') + '" onclick="setRange(\'hours\')">' + tr('rangeHours') + '</button>';
+  const btnDay = '<button class="' + (!isHour ? 'active' : '') + '" onclick="setRange(\'day\')">' + tr('rangeDay') + '</button>';
+  const navBack = '<button class="navbtn" ' + (canBack ? '' : 'disabled ') + 'onclick="shiftChart(-1)">&#9664;</button>';
+  const navFwd = '<button class="navbtn" ' + (canFwd ? '' : 'disabled ') + 'onclick="shiftChart(+1)">&#9654;</button>';
+  let html;
+  if (isHour) html = navBack + ' ' + btnHour + ' ' + navFwd + '   ' + btnDay;
+  else html = btnHour + '   ' + navBack + ' ' + btnDay + ' ' + navFwd;
+  inner.innerHTML = html;
+  if (label) label.textContent = formatRangeLabel();
+}
+function setRange(r) {
+  if (r === chartRange) return;
+  chartRange = r; renderRangeRow(); rebuildChart();
+}
+function shiftChart(dir) {
+  if (!chartLoaded) return;
+  const step = rangeMs();
+  const maxTo = ceilToHour(Date.now());
+  let newTo = chartToMs + dir * step;
+  if (newTo > maxTo) newTo = maxTo;
+  const minTo = chartDataMin > 0 ? ceilToHour(chartDataMin) + step : 0;
+  if (newTo < minTo) newTo = minTo;
+  if (newTo === chartToMs) return;
+  chartToMs = newTo; renderRangeRow(); rebuildChart();
+}
+function showChartMask(show) {
+  const m = document.getElementById('chartMask');
+  if (!m) return;
+  if (show) m.classList.add('show'); else m.classList.remove('show');
+}
+
+function drawLightning(ctx, x, y, s, color, crossed) {
+  ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x + s*0.1, y - s*0.5); ctx.lineTo(x - s*0.2, y + s*0.1);
+  ctx.lineTo(x + s*0.05, y + s*0.1); ctx.lineTo(x - s*0.1, y + s*0.5);
+  ctx.lineTo(x + s*0.25, y - s*0.1); ctx.lineTo(x - s*0.05, y - s*0.1);
+  ctx.closePath(); ctx.stroke();
+  if (crossed) {
+    ctx.beginPath(); ctx.moveTo(x - s*0.6, y - s*0.6); ctx.lineTo(x + s*0.6, y + s*0.6); ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawBattery(ctx, x, y, s, color, level) {
+  ctx.save(); ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 1.6;
+  const w = s * 0.82, h = s * 0.42;
+  const left = x - w / 2, top = y - h / 2;
+  ctx.strokeRect(left, top, w, h);
+  ctx.fillRect(left + w, y - h*0.21, w*0.14, h*0.42);
+  let fillW = 0;
+  if (level === 1) fillW = (w - 4) * 0.35;
+  else if (level === 2) fillW = (w - 4) * 0.85;
+  if (fillW > 0) ctx.fillRect(left + 2, top + 2, fillW, h - 4);
+  ctx.restore();
+}
+function drawWifi(ctx, x, y, s, color, crossed) {
+  ctx.save(); ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2; ctx.lineCap = 'round';
+  for (let i = 1; i <= 3; i++) {
+    ctx.beginPath(); ctx.arc(x, y + s*0.4, s*0.2*i, Math.PI * 1.25, Math.PI * 1.75); ctx.stroke();
+  }
+  ctx.beginPath(); ctx.arc(x, y + s*0.35, s*0.08, 0, 2*Math.PI); ctx.fill();
+  if (crossed) {
+    ctx.beginPath(); ctx.moveTo(x - s*0.6, y - s*0.6); ctx.lineTo(x + s*0.6, y + s*0.6); ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawPowerSymbol(ctx, x, y, s, color) {
+  ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineCap = 'round';
+  const r = s * 0.42;
+  ctx.beginPath(); ctx.arc(x, y, r, -Math.PI * 145 / 180, -Math.PI * 35 / 180, true); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x, y - r * 1.05); ctx.lineTo(x, y + r * 0.15); ctx.stroke();
+  ctx.restore();
+}
+function drawEnvelope(ctx, x, y, s, color) {
+  ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 2;
+  const w = s*0.9, h = s*0.6;
+  ctx.strokeRect(x - w/2, y - h/2, w, h);
+  ctx.beginPath();
+  ctx.moveTo(x - w/2, y - h/2); ctx.lineTo(x, y + h*0.1); ctx.lineTo(x + w/2, y - h/2);
+  ctx.stroke(); ctx.restore();
+}
+function drawClock(ctx, x, y, s, color) {
+  ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(x, y, s*0.45, 0, 2*Math.PI); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x, y); ctx.lineTo(x, y - s*0.3);
+  ctx.moveTo(x, y); ctx.lineTo(x + s*0.25, y + s*0.1);
+  ctx.stroke(); ctx.restore();
+}
+function drawRefresh(ctx, x, y, s, color) {
+  ctx.save(); ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(x, y, s*0.4, Math.PI * 0.3, Math.PI * 1.8); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x + s*0.3, y - s*0.4); ctx.lineTo(x + s*0.5, y - s*0.3);
+  ctx.lineTo(x + s*0.4, y - s*0.1); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+function drawThermometer(ctx, x, y, s, color) {
+  ctx.save(); ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(x, y + s*0.3, s*0.18, 0, 2*Math.PI); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(x, y - s*0.45); ctx.lineTo(x, y + s*0.2); ctx.stroke();
+  ctx.restore();
+}
+
+function parseEvents(text) {
+  const lines = text.split(/\r?\n/);
+  const events = [];
+  let lastBatt = 8.0;
+  const map = [
+    { re: /\[EVT\]\s+STATE\s+->\s+INPUT_LOST/, type: 'INPUT_LOST',  cat: 'power' },
+    { re: /\[EVT\]\s+STATE\s+->\s+NORMAL/,     type: 'INPUT_REST', cat: 'power' },
+    { re: /\[EVT\]\s+STATE\s+->\s+LOW_BATT/,   type: 'BATT_LOW',   cat: 'batt'  },
+    { re: /\[EVT\]\s+STATE\s+->\s+CRITICAL/,   type: 'BATT_CRIT',  cat: 'batt'  },
+    { re: /\[EVT\]\s+SNMP:/,                   type: 'SNMP',       cat: 'snmp'  },
+    { re: /\[EVT\]\s+WoL sent to/,             type: 'WOL',        cat: 'wol'   },
+    { re: /\[EVT\]\s+NTP synced/,              type: 'NTP_OK',     cat: 'ntp'   },
+    { re: /\[EVT\]\s+NTP FAILED/,              type: 'NTP_FAIL',   cat: 'ntp'   },
+    { re: /\[EVT\]\s+boot/,                    type: 'BOOT',       cat: 'boot'  },
+    { re: /\[EVT\]\s+WiFi connected/,          type: 'WIFI_OK',    cat: 'wifi'  },
+    { re: /\[EVT\]\s+WiFi lost/,               type: 'WIFI_LOST',  cat: 'wifi'  },
+    { re: /\[EVT\]\s+TEMP_HIGH/,               type: 'TEMP_HIGH',  cat: 'temp'  },
+    { re: /\[EVT\]\s+TEMP_OK/,                 type: 'TEMP_OK',    cat: 'temp'  },
+    { re: /\[EVT\]\s+TG:OK/,                   type: 'TG_OK',      cat: 'notify' },
+    { re: /\[EVT\]\s+TG:FAIL/,                 type: 'TG_FAIL',    cat: 'notify' },
+    { re: /\[EVT\]\s+EM:OK/,                   type: 'EM_OK',      cat: 'notify' },
+    { re: /\[EVT\]\s+EM:FAIL/,                 type: 'EM_FAIL',    cat: 'notify' }
+  ];
+  const reLog = /\[LOG\]\s+([\d.]+)V\//;
+  for (const line of lines) {
+    const mLog = line.match(reLog);
+    if (mLog) lastBatt = parseFloat(mLog[1]);
+    for (const m of map) {
+      if (m.re.test(line)) {
+        const mTs = line.match(/^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})/);
+        if (!mTs) continue;
+        const d = new Date(mTs[1].replace(' ', 'T'));
+        if (isNaN(d.getTime())) continue;
+        events.push({ t: d.getTime(), type: m.type, cat: m.cat, y: lastBatt });
+        break;
+      }
+    }
+  }
+  return events;
+}
+
+function evtColor(type) {
+  const map = {
+    INPUT_LOST:'#e84c3c', INPUT_REST:'#3ecb6e', BATT_LOW:'#e8b53c',
+    BATT_CRIT:'#e84c3c', SNMP:'#a35eff', WOL:'#4ea1ff',
+    NTP_OK:'#3ecb6e', NTP_FAIL:'#e84c3c', BOOT:'#ffffff',
+    WIFI_OK:'#3ecb6e', WIFI_LOST:'#e84c3c', TEMP_HIGH:'#ff8c42', TEMP_OK:'#3ecb6e',
+    TG_OK:'#3ecb6e', TG_FAIL:'#e84c3c', EM_OK:'#3ecb6e', EM_FAIL:'#e84c3c'
+  };
+  return map[type] || '#ffffff';
+}
+
+function evtTipText(type) {
+  const map = {
+    INPUT_LOST:'tipEvtInputLost', INPUT_REST:'tipEvtInputRest',
+    BATT_LOW:'tipEvtBattLow', BATT_CRIT:'tipEvtBattCrit',
+    SNMP:'tipEvtSnmp', WOL:'tipEvtWol',
+    NTP_OK:'tipEvtNtpOk', NTP_FAIL:'tipEvtNtpFail',
+    BOOT:'tipEvtBoot', WIFI_OK:'tipEvtWifiOk', WIFI_LOST:'tipEvtWifiLost',
+    TEMP_HIGH:'tipEvtTempHigh', TEMP_OK:'tipEvtTempHigh',
+    TG_OK:'tipEvtTgOk', TG_FAIL:'tipEvtTgFail',
+    EM_OK:'tipEvtEmOk', EM_FAIL:'tipEvtEmFail'
+  };
+  return tr(map[type] || type);
+}
+
+const iconsPlugin = {
+  id: 'iconsPlugin',
+  afterDatasetsDraw(chart) {
+    const ctx = chart.ctx;
+    const events = chart._upsEvents || [];
+    const pts = chart._upsPts || [];
+    if (!events.length || !pts.length) { chart._upsHits = []; return; }
+    const xScale = chart.scales.x;
+    const yScale = chart.scales.y;
+    function findNearestIndex(t) {
+      let bestIdx = 0, bestDiff = Infinity;
+      for (let i = 0; i < pts.length; i++) {
+        const diff = Math.abs(pts[i].t - t);
+        if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+      }
+      return bestIdx;
+    }
+    const yBottomBase = yScale.getPixelForValue(0);
+    const chartBottom = chart.chartArea.bottom;
+    const yBase = Math.min(yBottomBase, chartBottom) - 12;
+    const items = [];
+    for (const ev of events) {
+      const idx = findNearestIndex(ev.t);
+      const xPix = xScale.getPixelForValue(idx);
+      if (isNaN(xPix)) continue;
+      items.push({ ev, xPix });
+    }
+    items.sort((a, b) => {
+      if (Math.abs(a.xPix - b.xPix) > 3) return a.xPix - b.xPix;
+      return a.ev.t - b.ev.t;
+    });
+    for (let i = 0; i < items.length; i++) {
+      items[i].stack = 0;
+      for (let j = 0; j < i; j++) {
+        if (Math.abs(items[i].xPix - items[j].xPix) < 3) {
+          items[i].stack = Math.max(items[i].stack, items[j].stack + 1);
+        }
+      }
+    }
+    const hits = [];
+    for (const it of items) {
+      const ev = it.ev;
+      const xPix = it.xPix;
+      const yPix = yBase - it.stack * 26;
+      const color = evtColor(ev.type);
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.75)';
+      ctx.beginPath(); ctx.arc(xPix, yPix, 12, 0, 2*Math.PI); ctx.fill();
+      ctx.strokeStyle = color; ctx.lineWidth = 1.8; ctx.stroke();
+      ctx.restore();
+      const s = 14;
+      switch (ev.type) {
+        case 'INPUT_LOST': drawLightning(ctx, xPix, yPix, s, color, true); break;
+        case 'INPUT_REST': drawLightning(ctx, xPix, yPix, s, color, false); break;
+        case 'BATT_LOW':   drawBattery(ctx, xPix, yPix, s, color, 1); break;
+        case 'BATT_CRIT':  drawBattery(ctx, xPix, yPix, s, color, 0); break;
+        case 'SNMP':       drawEnvelope(ctx, xPix, yPix, s, color); break;
+        case 'WOL':        drawPowerSymbol(ctx, xPix, yPix, s, color); break;
+        case 'NTP_OK':
+        case 'NTP_FAIL':   drawClock(ctx, xPix, yPix, s, color); break;
+        case 'BOOT':       drawRefresh(ctx, xPix, yPix, s, color); break;
+        case 'WIFI_OK':    drawWifi(ctx, xPix, yPix, s, color, false); break;
+        case 'WIFI_LOST':  drawWifi(ctx, xPix, yPix, s, color, true); break;
+        case 'TEMP_HIGH':
+        case 'TEMP_OK':    drawThermometer(ctx, xPix, yPix, s, color); break;
+        default:           drawEnvelope(ctx, xPix, yPix, s, color); break;
+      }
+      hits.push({ x: xPix, y: yPix, r: 11, type: ev.type });
+    }
+    chart._upsHits = hits;
+  }
+};
+
+let chartObj = null;
+let lastMaxBytes = 0;
+let lastPoints = [];
+let lastEvents = [];
+
+function pad(n){return n<10?'0'+n:''+n;}
+
+function fmtBytes(b){
+  if (b < 1024) return b + ' B';
+  if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
+  return (b/1024/1024).toFixed(2) + ' MB';
+}
+
+function fmtDuration(sec){
+  if (sec < 60) return Math.round(sec) + ' s';
+  if (sec < 3600) return Math.round(sec/60) + ' min';
+  if (sec < 86400) {
+    const h = Math.floor(sec/3600);
+    const m = Math.round((sec%3600)/60);
+    return h + ' h ' + m + ' min';
+  }
+  const d = Math.floor(sec/86400);
+  const h = Math.floor((sec%86400)/3600);
+  return d + ' d ' + h + ' h';
+}
+
+async function refresh() {
+  try {
+    const r = await fetch('/api/status');
+    const j = await r.json();
+    lastStateName = j.state_name || 'NORMAL';
+    document.getElementById('state').textContent = stateLabel(lastStateName);
+    document.getElementById('state').className = 'value state-' + j.state_name;
+    document.getElementById('battV').textContent = j.battery_v.toFixed(3);
+    document.getElementById('battPct').textContent = j.battery_pct;
+    document.getElementById('battBar').style.width = j.battery_pct + '%';
+    document.getElementById('inpV').textContent = j.input_v.toFixed(3);
+    const inpEl = document.getElementById('inpSt');
+    inpEl.dataset.ok = j.input_present ? '1' : '0';
+    inpEl.textContent = j.input_present ? tr('powerOk') : tr('powerLost');
+    const rt = j.runtime_sec;
+    document.getElementById('runtime').textContent =
+      rt > 0 ? Math.floor(rt/60) + ' min ' + (rt%60) + ' s' : '0 s';
+    document.getElementById('net').textContent = j.ip + ' / ' + j.ssid;
+    document.getElementById('rssi').textContent = j.rssi + ' dBm';
+    document.getElementById('uptime').textContent = j.uptime_str;
+    document.getElementById('cpu_temp').textContent = (j.temp_c !== undefined) ? j.temp_c.toFixed(1) + ' °C' : '—';
+    document.getElementById('heap_free').textContent = (j.heap_free !== undefined) ? fmtBytes(j.heap_free) : '—';
+    const dt = j.datetime || '—';
+    const now = new Date();
+    const upd = pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds()) + ' ' +
+                pad(now.getDate()) + '.' + pad(now.getMonth()+1) + '.' + now.getFullYear();
+    document.getElementById('clk_main').textContent = dt;
+    document.getElementById('clk_upd').textContent  = upd;
+    const ntpEl = document.getElementById('clk_ntp');
+    ntpEl.dataset.synced = j.ntp_synced ? '1' : '0';
+    ntpEl.textContent = j.ntp_synced ? tr('ntpSynced') : tr('ntpNo');
+    document.getElementById('updline').textContent = upd;
+    document.getElementById('cal_batt_off_show').textContent = j.cal_batt_off.toFixed(2);
+    document.getElementById('cal_batt_gain_show').textContent = j.cal_batt_gain.toFixed(4);
+    document.getElementById('cal_batt_v').textContent = j.battery_v.toFixed(3);
+    document.getElementById('cal_input_off_show').textContent = j.cal_input_off.toFixed(2);
+    document.getElementById('cal_input_gain_show').textContent = j.cal_input_gain.toFixed(4);
+    document.getElementById('cal_input_v').textContent = j.input_v.toFixed(3);
+    document.getElementById('host').textContent = location.host || 'demo.local';
+    if (j.fw) document.getElementById('fwver').textContent = j.fw;
+    if (j.wol_status_code !== undefined) {
+      lastWolCode = j.wol_status_code; lastWolSec = j.wol_status_sec || 0; updateWolStatus();
+    }
+    if (j.tg_status_code !== undefined) {
+      lastTgCode = j.tg_status_code; lastTgSec = j.tg_status_queue || 0; updateTgStatus();
+    }
+    if (j.em_status_code !== undefined) {
+      lastEmCode = j.em_status_code; lastEmSec = j.em_status_queue || 0; updateEmStatus();
+    }
+    if (j.log_size !== undefined) {
+      document.getElementById('lc_logsize').textContent = fmtBytes(j.log_size);
+      document.getElementById('lc_logold').textContent = fmtBytes(j.log_old_bytes || 0);
+      document.getElementById('lc_logtotal').textContent = fmtBytes(j.log_total_bytes || j.log_size);
+      document.getElementById('lc_maxbytes').textContent = fmtBytes(j.log_max_bytes);
+      document.getElementById('lc_lfsfree').textContent = fmtBytes(j.lfs_free);
+      lastMaxBytes = j.log_max_bytes;
+      const sel = document.getElementById('lc_period');
+      if (sel && !sel.dataset.userChanged) {
+        if (j.log_period_sec !== undefined) sel.value = j.log_period_sec;
+      }
+      recalcFill();
+    }
+    if (!uiCfgLoaded && j.ui_lang !== undefined && j.ui_event_mask !== undefined) {
+      uiCfgLoaded = true;
+      applyUiConfig(j.ui_lang, j.ui_event_mask);
+    }
+  } catch(e) { console.error(e); }
+}
+refresh();
+setInterval(refresh, 2000);
+
+function recalcFill() {
+  const sel = document.getElementById('lc_period');
+  if (!sel) return;
+  sel.dataset.userChanged = '1';
+  const period = parseInt(sel.value);
+  const el = document.getElementById('lc_fill1');
+  if (!el) return;
+  if (period === 0) { el.textContent = '∞'; return; }
+  const LOG_LINE_BYTES = 60;
+  const capacity = Math.floor(lastMaxBytes / LOG_LINE_BYTES);
+  const baseSec = capacity * period;
+  const evtSec = Math.floor(baseSec * 0.9);
+  el.textContent = fmtDuration(evtSec);
+}
+
+function applyUiConfig(lang, mask) {
+  if (lang === 'en' || lang === 'ru') applyLang(lang);
+  const m = (mask !== undefined) ? parseInt(mask) : 0x00FF;
+  const setChk = (id, bit) => {
+    const el = document.getElementById(id);
+    if (el) el.checked = !!(m & bit);
+  };
+  setChk('ev_power', 0x0001); setChk('ev_batt',  0x0002);
+  setChk('ev_wifi',  0x0004); setChk('ev_snmp',  0x0008);
+  setChk('ev_wol',   0x0010); setChk('ev_ntp',   0x0020);
+  setChk('ev_boot',  0x0040); setChk('ev_tg_em', 0x0080);
+}
+
+async function saveUiEventMask() {
+  let mask = 0;
+  if (document.getElementById('ev_power').checked) mask |= 0x0001;
+  if (document.getElementById('ev_batt').checked)  mask |= 0x0002;
+  if (document.getElementById('ev_wifi').checked)  mask |= 0x0004;
+  if (document.getElementById('ev_snmp').checked)  mask |= 0x0008;
+  if (document.getElementById('ev_wol').checked)   mask |= 0x0010;
+  if (document.getElementById('ev_ntp').checked)   mask |= 0x0020;
+  if (document.getElementById('ev_boot').checked)  mask |= 0x0040;
+  if (document.getElementById('ev_tg_em').checked) mask |= 0x0080;
+  try {
+    await fetch('/api/ui_config', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({uiEventMask: mask})
+    });
+  } catch(e) {}
+}
+
+document.querySelectorAll('.tabs button').forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    document.getElementById('tab-' + b.dataset.tab).classList.add('active');
+    if (b.dataset.tab === 'chart') loadChart();
+  };
+});
+
+['ev_power','ev_batt','ev_wifi','ev_snmp','ev_wol','ev_ntp','ev_boot','ev_tg_em']
+  .forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.onchange = () => { saveUiEventMask(); rebuildChart(); };
+  });
+document.getElementById('chk_batt').onchange = () => rebuildChart();
+document.getElementById('chk_inp').onchange  = () => rebuildChart();
+document.getElementById('chk_temp').onchange = () => rebuildChart();
+
+function showMsg(text, ok) {
+  const m = document.getElementById('msg');
+  m.textContent = text;
+  m.className = 'msg ' + (ok ? 'ok' : 'err');
+  setTimeout(()=>{ m.className='msg'; }, 4000);
+}
+
+(function() {
+  const tip = document.getElementById('evtTip');
+  document.addEventListener('mousemove', (e) => {
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    if (!el || el.id !== 'chartMain') {
+      if (tip.style.display !== 'none') tip.style.display = 'none';
+      return;
+    }
+    if (!chartObj || !chartObj._upsHits || !chartObj._upsHits.length) {
+      tip.style.display = 'none'; return;
+    }
+    const rect = el.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    let hit = null, bestDist2 = Infinity;
+    for (const h of chartObj._upsHits) {
+      const dx = x - h.x, dy = y - h.y, d2 = dx*dx + dy*dy;
+      if (d2 <= h.r * h.r && d2 <= bestDist2) { bestDist2 = d2; hit = h; }
+    }
+    if (!hit) { tip.style.display = 'none'; return; }
+    tip.innerHTML = '<b>' + evtTipText(hit.type) + '</b>';
+    tip.style.left = (e.clientX + 12) + 'px';
+    tip.style.top  = (e.clientY + 12) + 'px';
+    tip.style.display = 'block';
+  });
+  document.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+})();
+
+function parseLogLines(text) {
+  const lines = text.split(/\r?\n/);
+  const points = [];
+  const re = /^(.+?)\s+\[LOG\]\s+([\d.]+)V\/(\d+)%\|([\d.]+)V\/(\w+)\|(\d+)s\|([\d.\-]+)C/;
+  const nowMs = Date.now();
+  for (const line of lines) {
+    const m = line.match(re);
+    if (!m) continue;
+    const ts = m[1].trim();
+    const batt  = parseFloat(m[2]);
+    const pct   = parseInt(m[3]);
+    const inp   = parseFloat(m[4]);
+    const rt    = parseInt(m[6]);
+    const temp  = parseFloat(m[7]);
+    let tMs;
+    if (ts.startsWith('up ')) {
+      const parts = ts.substring(3).split(':');
+      if (parts.length !== 3) continue;
+      const upSec = parseInt(parts[0])*3600 + parseInt(parts[1])*60 + parseInt(parts[2]);
+      tMs = nowMs - upSec * 1000;
+    } else {
+      const d = new Date(ts.replace(' ', 'T'));
+      if (isNaN(d.getTime())) continue;
+      tMs = d.getTime();
+    }
+    points.push({t: tMs, batt, pct, inp, rt, temp});
+  }
+  points.sort((a, b) => a.t - b.t);
+  return points;
+}
+
+function filterByWindow(points, fromMs, toMs) {
+  return points.filter(p => p.t >= fromMs && p.t <= toMs);
+}
+
+async function loadChart() {
+  showChartMask(true);
+  try {
+    const r = await fetch('/api/log');
+    const txt = await r.text();
+    lastPoints = parseLogLines(txt);
+    lastEvents = parseEvents(txt);
+    chartLoaded = true;
+    if (lastPoints.length > 0) {
+      chartDataMin = lastPoints[0].t;
+      chartDataMax = lastPoints[lastPoints.length - 1].t;
+    } else {
+      chartDataMin = 0; chartDataMax = 0;
+    }
+    if (chartToMs === 0) initChartWindow();
+    else { const maxTo = ceilToHour(Date.now()); if (chartToMs > maxTo) chartToMs = maxTo; }
+    renderRangeRow();
+    rebuildChart();
+  } catch(e) { console.error(e); }
+  finally { showChartMask(false); }
+}
+
+function rebuildChart() {
+  const to   = chartToMs || ceilToHour(Date.now());
+  const from = to - rangeMs();
+  const pts = filterByWindow(lastPoints, from, to);
+  const labels = pts.map(p => {
+    const d = new Date(p.t);
+    return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ' ' +
+           pad(d.getDate()) + '.' + pad(d.getMonth()+1);
+  });
+  const dataBatt = pts.map(p => p.batt);
+  const dataInp  = pts.map(p => p.inp);
+  const dataTemp = pts.map(p => p.temp);
+  const datasets = [];
+  if (document.getElementById('chk_batt').checked) {
+    datasets.push({ label:tr('legendBatt'), data:dataBatt,
+      borderColor:'#4ea1ff', backgroundColor:'rgba(78,161,255,0.15)',
+      yAxisID:'y', tension:0.2, pointRadius:0 });
+  }
+  if (document.getElementById('chk_inp').checked) {
+    datasets.push({ label:tr('legendInput'), data:dataInp,
+      borderColor:'#3ecb6e', backgroundColor:'rgba(62,203,110,0.15)',
+      yAxisID:'y', tension:0.2, pointRadius:0 });
+  }
+  if (document.getElementById('chk_temp').checked) {
+    datasets.push({ label:tr('legendTemp'), data:dataTemp,
+      borderColor:'#ff8c42', backgroundColor:'rgba(255,140,66,0.15)',
+      yAxisID:'y1', tension:0.2, pointRadius:0 });
+  }
+  const enabledCats = [];
+  if (document.getElementById('ev_power').checked) enabledCats.push('power');
+  if (document.getElementById('ev_batt').checked)  enabledCats.push('batt');
+  if (document.getElementById('ev_wifi').checked)  enabledCats.push('wifi');
+  if (document.getElementById('ev_snmp').checked)  enabledCats.push('snmp');
+  if (document.getElementById('ev_wol').checked)   enabledCats.push('wol');
+  if (document.getElementById('ev_ntp').checked)   enabledCats.push('ntp');
+  if (document.getElementById('ev_boot').checked)  enabledCats.push('boot');
+  if (document.getElementById('ev_tg_em').checked) enabledCats.push('notify');
+  enabledCats.push('temp');
+  let visibleEvents = lastEvents
+    .filter(ev => enabledCats.includes(ev.cat) && ev.t >= from && ev.t <= to)
+    .sort((a, b) => a.t - b.t);
+
+  let yAxisMin = 0, yAxisMax = 0;
+  {
+    const vals = [];
+    if (document.getElementById('chk_batt').checked) {
+      for (const v of dataBatt) if (isFinite(v)) vals.push(v);
+    }
+    if (document.getElementById('chk_inp').checked) {
+      for (const v of dataInp) if (isFinite(v)) vals.push(v);
+    }
+    if (vals.length > 0) {
+      let vMin = Math.min.apply(null, vals);
+      let vMax = Math.max.apply(null, vals);
+      if (vMax - vMin < 0.5) {
+        const mid = (vMin + vMax) / 2;
+        vMin = mid - 0.25; vMax = mid + 0.25;
+      } else {
+        const pad = (vMax - vMin) * 0.05;
+        vMin -= pad; vMax += pad;
+      }
+      yAxisMin = Math.floor(vMin * 10) / 10;
+      yAxisMax = Math.ceil (vMax * 10) / 10;
+      if (yAxisMin < 0) yAxisMin = 0;
+    }
+  }
+
+  const cfg = {
+    type:'line',
+    data:{ labels, datasets },
+    plugins: [iconsPlugin],
+    options:{
+      responsive:true, animation:false,
+      interaction:{ mode:'index', intersect:false },
+      layout:{ padding:{ bottom: 40 } },
+      scales:{
+        y:{ type:'linear', position:'left',
+            title:{ display:true, text:'Voltage, V', color:'#ccc' },
+            min: yAxisMin, max: yAxisMax,
+            ticks:{ color:'#aaa', stepSize: 0.1, autoSkip: true },
+            grid:{ color:'#2a2a2a' } },
+        y1:{ type:'linear', position:'right',
+            title:{ display:true, text:'Temp., °C', color:'#ccc' },
+            ticks:{ color:'#aaa' }, grid:{ drawOnChartArea:false } },
+        x:{ ticks:{ color:'#aaa', maxRotation:45, autoSkip:true },
+            grid:{ color:'#222' } }
+      },
+      plugins:{
+        legend:{ display:false },
+        tooltip:{ enabled:true }
+      }
+    }
+  };
+  if (chartObj) chartObj.destroy();
+  chartObj = new Chart(document.getElementById('chartMain'), cfg);
+  chartObj._upsEvents = visibleEvents;
+  chartObj._upsPts    = pts;
+  chartObj.update('none');
+}
+
+async function loadLogCfg() {
+  try {
+    const r = await fetch('/api/config');
+    const c = await r.json();
+    if (c.logVoltPeriodSec !== undefined) {
+      const sel = document.getElementById('lc_period');
+      if (sel) sel.value = c.logVoltPeriodSec;
+      recalcFill();
+    }
+  } catch(e) { console.error(e); }
+}
+loadLogCfg();
+
+async function saveLogCfg() {
+  const sel = document.getElementById('lc_period');
+  const period = parseInt(sel.value);
+  if (!confirm(tr('confirmSaveLog'))) return;
+  const r = await fetch('/api/log_config', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({logVoltPeriodSec: period})
+  });
+  if (r.ok) {
+    isDirty = false;
+    showMsg(tr('logSaved'), true);
+    setTimeout(()=>{ fetch('/api/reboot'); }, 1000);
+  } else showMsg(tr('logSaveErr'), false);
+}
+
+async function ntpSyncNow() {
+  if (!confirm(tr('confirmNtp'))) return;
+  const r = await fetch('/api/ntp_sync', {method:'POST'});
+  if (r.ok) showMsg(tr('ntpSent'), true);
+  else showMsg(tr('ntpErr'), false);
+}
+
+const PANE_FIELDS = {
+  net:  ['wifiSsid','wifiPass','hostname','useDhcp','ip','mask','gw','dns',
+         'ntpServer1','ntpServer2','ntpTz','tempHighC',
+         'battFullV','battEmptyV','battWarnV','battCapacityWh','loadCurrentA',
+         'inputLostV'],
+  snmp: ['qnapIp','qnapMac','snmpCommunity','snmpPort','useInform','enterpriseOid'],
+  cal:  ['battOffsetMv','battGain','inputOffsetMv','inputGain'],
+  wol:  ['wolEnable','wolOutageMinSec','wolStableSec','wolBattMinPct'],
+  tg:   ['tgToken','tgChatId','tgEnable','tgPeriod','tgEvents'],
+  em:   ['emSmtpHost','emSmtpPort','emUser','emPass','emFrom','emTo',
+         'emEnable','emPeriod','emEvents'],
+  ota:  ['otaUser','otaPass']
+};
+
+function collectAllFields() {
+  const body = {};
+  Object.keys(PANE_FIELDS).forEach(pane => {
+    PANE_FIELDS[pane].forEach(f => {
+      const el = document.getElementById('c_' + f);
+      if (el) body[f] = el.value;
+    });
+  });
+  const hSel = document.getElementById('c_ntpSyncHour');
+  const mSel = document.getElementById('c_ntpSyncMin');
+  if (hSel) body.ntpSyncHour = parseInt(hSel.value);
+  if (mSel) body.ntpSyncMin  = parseInt(mSel.value);
+  const ipEl  = document.getElementById('c2_qnapIp');
+  const macEl = document.getElementById('c2_qnapMac');
+  if (ipEl)  body.qnapIp  = ipEl.value;
+  if (macEl) body.qnapMac = macEl.value;
+  let tgMask = 0;
+  if (document.getElementById('evt_power').checked) tgMask |= 0x0001;
+  if (document.getElementById('evt_batt').checked)  tgMask |= 0x0002;
+  if (document.getElementById('evt_wol').checked)   tgMask |= 0x0004;
+  if (document.getElementById('evt_boot').checked)  tgMask |= 0x0008;
+  if (document.getElementById('evt_wifi').checked)  tgMask |= 0x0010;
+  if (document.getElementById('evt_snmp').checked)  tgMask |= 0x0020;
+  if (document.getElementById('evt_ntp').checked)   tgMask |= 0x0040;
+  if (document.getElementById('evt_temp').checked)  tgMask |= 0x0080;
+  body.tgEvents = tgMask;
+  let emMask = 0;
+  if (document.getElementById('emt_power').checked) emMask |= 0x0001;
+  if (document.getElementById('emt_batt').checked)  emMask |= 0x0002;
+  if (document.getElementById('emt_wol').checked)   emMask |= 0x0004;
+  if (document.getElementById('emt_boot').checked)  emMask |= 0x0008;
+  if (document.getElementById('emt_wifi').checked)  emMask |= 0x0010;
+  if (document.getElementById('emt_snmp').checked)  emMask |= 0x0020;
+  if (document.getElementById('emt_ntp').checked)   emMask |= 0x0040;
+  if (document.getElementById('emt_temp').checked)  emMask |= 0x0080;
+  body.emEvents = emMask;
+  body.informPeriodSec = 30;
+  body.uiLang = curLang;
+  let uiMask = 0;
+  if (document.getElementById('ev_power').checked) uiMask |= 0x0001;
+  if (document.getElementById('ev_batt').checked)  uiMask |= 0x0002;
+  if (document.getElementById('ev_wifi').checked)  uiMask |= 0x0004;
+  if (document.getElementById('ev_snmp').checked)  uiMask |= 0x0008;
+  if (document.getElementById('ev_wol').checked)   uiMask |= 0x0010;
+  if (document.getElementById('ev_ntp').checked)   uiMask |= 0x0020;
+  if (document.getElementById('ev_boot').checked)  uiMask |= 0x0040;
+  if (document.getElementById('ev_tg_em').checked) uiMask |= 0x0080;
+  body.uiEventMask = uiMask;
+  return body;
+}
+
+async function saveAllPanes() {
+  const body = collectAllFields();
+  if (!confirm(tr('confirmSave') + '?\n\n' + tr('confirmReboot'))) return;
+  try {
+    const r = await fetch('/api/config', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    if (r.ok) {
+      isDirty = false;
+      showMsg(tr('saveChanges') + ' ' + tr('savedOk'), true);
+      setTimeout(()=>{ fetch('/api/reboot'); }, 1500);
+    } else showMsg(tr('saveErr') + r.status, false);
+  } catch(e) { showMsg(tr('saveErr') + e, false); }
+}
+
+async function loadConfig() {
+  const r = await fetch('/api/config');
+  const c = await r.json();
+  for (const k in c) {
+    const el = document.getElementById('c_' + k);
+    if (el) el.value = c[k];
+  }
+  const ipEl  = document.getElementById('c2_qnapIp');
+  const macEl = document.getElementById('c2_qnapMac');
+  if (ipEl  && c.qnapIp)  ipEl.value  = c.qnapIp;
+  if (macEl && c.qnapMac) macEl.value = c.qnapMac;
+  if (c.ntpSyncHour !== undefined && c.ntpSyncMin !== undefined) {
+    setNtpTimeValues(c.ntpSyncHour, c.ntpSyncMin);
+  }
+  const mask = (c.tgEvents !== undefined) ? parseInt(c.tgEvents) : 0x00FF;
+  document.getElementById('evt_power').checked = !!(mask & 0x0001);
+  document.getElementById('evt_batt').checked  = !!(mask & 0x0002);
+  document.getElementById('evt_wol').checked   = !!(mask & 0x0004);
+  document.getElementById('evt_boot').checked  = !!(mask & 0x0008);
+  document.getElementById('evt_wifi').checked  = !!(mask & 0x0010);
+  document.getElementById('evt_snmp').checked  = !!(mask & 0x0020);
+  document.getElementById('evt_ntp').checked   = !!(mask & 0x0040);
+  document.getElementById('evt_temp').checked  = !!(mask & 0x0080);
+  const emask = (c.emEvents !== undefined) ? parseInt(c.emEvents) : 0x00FF;
+  document.getElementById('emt_power').checked = !!(emask & 0x0001);
+  document.getElementById('emt_batt').checked  = !!(emask & 0x0002);
+  document.getElementById('emt_wol').checked   = !!(emask & 0x0004);
+  document.getElementById('emt_boot').checked  = !!(emask & 0x0008);
+  document.getElementById('emt_wifi').checked  = !!(emask & 0x0010);
+  document.getElementById('emt_snmp').checked  = !!(emask & 0x0020);
+  document.getElementById('emt_ntp').checked   = !!(emask & 0x0040);
+  document.getElementById('emt_temp').checked  = !!(emask & 0x0080);
+  if (c.tgPeriod !== undefined) document.getElementById('c_tgPeriod').value = c.tgPeriod;
+  if (c.emPeriod !== undefined) document.getElementById('c_emPeriod').value = c.emPeriod;
+  if (c.uiLang !== undefined) applyLang(c.uiLang);
+  if (c.uiEventMask !== undefined) applyUiConfig(c.uiLang, c.uiEventMask);
+}
+loadConfig();
+
+function paneName(pane) {
+  switch(pane) {
+    case 'net':  return tr('paneNet');
+    case 'snmp': return tr('paneSnmp');
+    case 'cal':  return tr('paneCal');
+    case 'wol':  return tr('paneWol');
+    case 'tg':   return tr('paneTg');
+    case 'em':   return tr('paneEm');
+    case 'ota':  return tr('paneOta');
+    default:     return pane;
+  }
+}
+
+async function resetPane(pane) {
+  const name = paneName(pane);
+  if (!confirm(tr('confirmReset') + ' «' + name + '» ' + tr('confirmResetQ') + '\n\n' +
+               tr('confirmResetNote') + '\n' + tr('confirmReboot'))) return;
+  const r = await fetch('/api/config_reset_pane', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({pane: pane})
+  });
+  if (r.ok) {
+    isDirty = false;
+    showMsg('«' + name + '» ' + tr('resetOk'), true);
+    setTimeout(()=>{ fetch('/api/reboot'); }, 1500);
+  } else showMsg(tr('resetErr') + r.status, false);
+}
+
+async function applyCal(which) {
+  const realEl = document.getElementById('cal_' + which + '_real');
+  const real = parseFloat(realEl.value);
+  if (!isFinite(real) || real <= 0) { showMsg(tr('badVoltage'), false); return; }
+  const r = await fetch('/api/calibrate', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({channel: which, real_v: real})
+  });
+  if (r.ok) {
+    const j = await r.json();
+    isDirty = true;
+    showMsg(tr('calApplied') + j.gain.toFixed(4) + tr('calApplied2'), true);
+  } else showMsg(tr('calErr'), false);
+}
+
+async function resetCal(which) {
+  const whichName = which === 'batt' ? tr('battShort') : tr('inputShort');
+  if (!confirm(tr('confirmResetCal') + ' ' + whichName + '?')) return;
+  const r = await fetch('/api/calibrate_reset', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({channel: which})
+  });
+  if (r.ok) { isDirty = true; showMsg(tr('calReset'), true); }
+}
+
+async function wolManual() {
+  if (!confirm(tr('confirmWol'))) return;
+  const r = await fetch('/api/wol_manual', {method:'POST'});
+  if (r.ok) {
+    const j = await r.json();
+    showMsg(j.ok ? tr('wolSent') : tr('wolErr'), j.ok);
+  } else showMsg(tr('wolErr'), false);
+}
+
+async function tgTest() {
+  if (!confirm(tr('confirmTgTest'))) return;
+  const r = await fetch('/api/telegram_test', {method:'POST'});
+  if (r.ok) {
+    const j = await r.json();
+    showMsg(j.ok ? tr('tgTestOk') : tr('tgTestErr'), j.ok);
+  } else showMsg(tr('tgTestErr'), false);
+}
+
+async function emTest() {
+  if (!confirm(tr('confirmEmTest'))) return;
+  const r = await fetch('/api/email_test', {method:'POST'});
+  if (r.ok) {
+    const j = await r.json();
+    showMsg(j.ok ? tr('emTestOk') : tr('emTestErr'), j.ok);
+  } else showMsg(tr('emTestErr'), false);
+}
+
+async function loadLog() {
+  const mask = document.getElementById('logMask');
+  if (mask) mask.classList.add('show');
+  try {
+    const r = await fetch('/api/log');
+    const t = await r.text();
+    document.getElementById('logbox').textContent = t;
+  } catch(e) {
+    console.error(e);
+    document.getElementById('logbox').textContent = 'Ошибка загрузки лога';
+  } finally {
+    if (mask) mask.classList.remove('show');
+  }
+}
+
+async function downloadLog() {
+  window.location = '/api/log_download';
+}
+
+async function clearLog() {
+  if (!confirm(tr('confirmClearLog'))) return;
+  const r = await fetch('/api/log_clear', {method:'POST'});
+  if (r.ok) { showMsg(tr('logCleared'), true); loadLog(); }
+}
+
+(function() {
+  document.addEventListener('input', (e) => {
+    const t = e.target;
+    if (!t) return;
+    if (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA') {
+      if (t.id === 'lc_period') return;
+      isDirty = true;
+    }
+  }, true);
+  document.addEventListener('change', (e) => {
+    const t = e.target;
+    if (!t) return;
+    if (t.tagName === 'SELECT' || (t.tagName === 'INPUT' && t.type === 'checkbox')) {
+      if (t.id === 'lc_period') return;
+      isDirty = true;
+    }
+  }, true);
+  window.addEventListener('beforeunload', (e) => {
+    if (!isDirty) return;
+    e.preventDefault();
+    e.returnValue = tr('leaveWarn');
+    return tr('leaveWarn');
+  });
+})();
+
+(function() {
+  installFieldIcons();
+  initNtpTimeSelects();
+  initChartWindow();
+  renderRangeRow();
+  let saved = null;
+  try { saved = localStorage.getItem('lang'); } catch(e) {}
+  if (saved !== 'ru' && saved !== 'en') saved = null;
+  if (saved) applyLang(saved);
+  else       applyLang('ru');
+})();
+</script>
+</body>
+</html>
