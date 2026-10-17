@@ -6,9 +6,11 @@
 [![Release](https://img.shields.io/badge/release-R10.9-green)]()
 [![License](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
 [![YouTube](https://img.shields.io/badge/YouTube-video-red?logo=youtube)](https://youtu.be/xlYLajyg3V0)
+[![Live Demo](https://img.shields.io/badge/Live_Demo-Open_Dashboard-blueviolet?logo=github)](https://ganc777.github.io/SNMP_FOR_DC_UPS/)
 
 🎬 **Видео по проекту:** [Основное видео](https://youtu.be/xlYLajyg3V0) · [Плейлист](https://www.youtube.com/playlist?list=PLHQahsdlvSlE)
 
+🖥️ **Онлайн-демо:** **[Открыть дашборд в браузере](https://ganc777.github.io/SNMP_FOR_DC_UPS/)** — интерактивная демонстрация интерфейса без установки ESP32. Все данные — симуляция.
 ---
 
 ## 🚀 Быстрый старт (5 минут)
@@ -74,6 +76,7 @@ QNAP NAS корректно выключался при аварии питан�
 ## 📋 Содержание
 
 - [Быстрый старт](#-быстрый-старт-5-минут)
+- [Онлайн-демо](#️-онлайн-демо-без-установки)
 - [Возможности](#возможности)
 - [Аппаратная часть](#аппаратная-часть)
 - [Программная часть](#программная-часть)
@@ -805,6 +808,7 @@ SNMP_FOR_DC_UPS/
 ├── LICENSE                    # MIT
 ├── .gitignore                 # Исключения для Git
 └── docs/
+    ├── index.html             # Интерактивное демо (GitHub Pages)
     ├── dashboard1.png         # Скриншот графиков
     ├── dashboard2.png         # Системные настройки (RU)
     ├── dashboard3.png         # Системные настройки (EN)
@@ -819,6 +823,7 @@ SNMP_FOR_DC_UPS/
 > `custom_ups.csv` в репозитории — **только для справки**. Его нужно
 > скопировать в системную папку ESP32 core (см. раздел выше).
 > `boards.txt` в репозиторий **не входит** — правится вручную.
+> `docs/index.html` — это **живое демо**, размещённое на GitHub Pages.
 
 ### Приоритеты инициализации
 
